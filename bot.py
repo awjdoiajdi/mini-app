@@ -83,6 +83,13 @@ def ai_messages(action: str, payload: dict) -> list[dict[str, str]]:
             "Верни JSON: {\"summary\":\"...\",\"wins\":[\"...\"],\"risks\":[\"...\"],"
             "\"tomorrow\":[\"...\"]}. Без мотивационной воды."
         ),
+        "chat": (
+            "Ответь как личный AI-помощник по задачам и дню пользователя. Видишь только переданный контекст. "
+            "Если пользователь просит создать задачи или в сообщении есть явные дела, предложи их в tasks. "
+            "Верни JSON: {\"reply\":\"...\",\"tasks\":[{\"title\":\"...\",\"date\":\"YYYY-MM-DD\","
+            "\"time\":\"HH:MM\",\"duration\":30,\"priority\":\"medium\",\"energy\":\"medium\","
+            "\"category\":\"Личное\"}]}. priority и energy: low, medium или high. Без воды."
+        ),
     }
     if action not in prompts:
         raise ValueError("Неизвестное AI-действие")
