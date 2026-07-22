@@ -1,15 +1,18 @@
 import asyncio
+import base64
 import hashlib
 import hmac
 import html
 import json
 import os
+import secrets
 import time
 from collections import defaultdict, deque
+from io import BytesIO
 from pathlib import Path
-from urllib.parse import parse_qsl, quote
+from urllib.parse import parse_qsl
 
-from aiohttp import ClientSession, ClientTimeout, web
+from aiohttp import ClientSession, ClientTimeout, FormData, web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -24,8 +27,11 @@ APP_URL = os.environ.get("APP_URL") or os.environ.get("RENDER_EXTERNAL_URL", "ht
 PORT = int(os.environ.get("PORT", "10000"))
 FRONTEND = Path(__file__).parent / "frontend" / "index.html"
 AI_URL = "https://api.groq.com/openai/v1/chat/completions"
+AUDIO_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 WEBHOOK_PATH = "/telegram/webhook"
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()
+CAPTURE_TTL = 15 * 60
+CAPTURES: dict[str, tuple[float, int, str]] = {}
 
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -72,6 +78,11 @@ def ai_messages(action: str, payload: dict) -> list[dict[str, str]]:
             "\"duration\":30,\"priority\":\"medium\",\"energy\":\"medium\",\"category\":\"Личное\"}],"
             "\"message\":\"...\"}. priority и energy: low, medium или high."
         ),
+        "review": (
+            "Коротко оцени день: что получилось, что мешало, что перенести на завтра. "
+            "Верни JSON: {\"summary\":\"...\",\"wins\":[\"...\"],\"risks\":[\"...\"],"
+            "\"tomorrow\":[\"...\"]}. Без мотивационной воды."
+        ),
     }
     if action not in prompts:
         raise ValueError("Неизвестное AI-действие")
@@ -95,35 +106,130 @@ def parse_ai_json(content: str):
         return json.loads(content[start:end + 1])
 
 
+def cleanup_captures(now: float | None = None):
+    now = time.monotonic() if now is None else now
+    for capture_id, (expires, _, _) in list(CAPTURES.items()):
+        if expires <= now:
+            CAPTURES.pop(capture_id, None)
+
+
+def remember_capture(text: str, user_id: int, now: float | None = None) -> str:
+    cleanup_captures(now)
+    capture_id = secrets.token_urlsafe(12)
+    # ponytail: in-memory handoff keeps bot-to-app private without a DB; use Redis after multi-instance scaling.
+    CAPTURES[capture_id] = ((time.monotonic() if now is None else now) + CAPTURE_TTL, user_id, text[:4000])
+    return capture_id
+
+
+def pop_capture(capture_id: str, user_id: int, now: float | None = None) -> str | None:
+    cleanup_captures(now)
+    item = CAPTURES.get(capture_id)
+    if not item or item[1] != user_id:
+        return None
+    CAPTURES.pop(capture_id, None)
+    return item[2]
+
+
+def capture_url(text: str, user_id: int) -> str:
+    separator = "&" if "?" in APP_URL else "?"
+    return f"{APP_URL}{separator}capture_id={remember_capture(text, user_id)}"
+
+
+async def groq_transcribe_voice(data: bytes) -> str:
+    form = FormData()
+    form.add_field("model", os.environ.get("GROQ_AUDIO_MODEL", "whisper-large-v3-turbo"))
+    form.add_field("language", "ru")
+    form.add_field("response_format", "json")
+    form.add_field("file", data, filename="voice.oga", content_type="audio/ogg")
+    async with ClientSession(timeout=ClientTimeout(total=60)) as session:
+        async with session.post(AUDIO_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, data=form) as response:
+            if response.status != 200:
+                raise RuntimeError(f"Groq не распознал голос ({response.status})")
+            return (await response.json()).get("text", "").strip()
+
+
+async def groq_read_image(data: bytes) -> str:
+    image = base64.b64encode(data).decode()
+    payload = {
+        "model": os.environ.get("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"),
+        "temperature": 0.1,
+        "max_tokens": 900,
+        "messages": [
+            {"role": "system", "content": "Извлеки из скриншота или фото только реальные задачи, даты, время и важный контекст. Отвечай кратким русским текстом."},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Найди задачи на изображении. Если задач нет, скажи это."},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image}"}},
+            ]},
+        ],
+    }
+    async with ClientSession(timeout=ClientTimeout(total=60)) as session:
+        async with session.post(AI_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, json=payload) as response:
+            if response.status != 200:
+                raise RuntimeError(f"Groq не прочитал скриншот ({response.status})")
+            return (await response.json())["choices"][0]["message"]["content"].strip()
+
+
+async def answer_capture(message: types.Message, text: str, title: str):
+    if not text.strip():
+        await message.answer("Не вижу текста для разбора. Отправь сообщение, голос или скриншот с задачами.")
+        return
+    if not message.from_user:
+        await message.answer("Не вижу Telegram-пользователя для приватной передачи в Mini App.")
+        return
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="Разобрать в DailyOS", web_app=WebAppInfo(url=capture_url(text, message.from_user.id)))
+    await message.answer(title, reply_markup=keyboard.as_markup())
+
+
 @dp.message(CommandStart())
 async def start(message: types.Message):
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="Открыть DailyOS", web_app=WebAppInfo(url=APP_URL))
     name = html.escape(message.from_user.first_name) if message.from_user else "друг"
     await message.answer(
-        f"<b>DailyOS</b>\n\nПривет, {name}! Это приложение для задач, привычек и фокус-сессий "
-        "с AI-планированием дня.\n\nОтправь мысль обычным сообщением или открой приложение.",
+        f"<b>DailyOS</b>\n\nПривет, {name}! Отправь сюда текст, пересланное сообщение, голос или скриншот. "
+        "Я перенесу это в AI-разбор, а приложение соберёт понятный план дня.",
         reply_markup=keyboard.as_markup(),
     )
 
 
 @dp.message(F.text)
 async def capture_message(message: types.Message):
-    text = message.text.strip()[:700]
-    can_transfer = len(text) <= 160
-    separator = "&" if "?" in APP_URL else "?"
-    url = f"{APP_URL}{separator}capture={quote(text)}" if can_transfer else APP_URL
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(
-        text="Разобрать в DailyOS",
-        web_app=WebAppInfo(url=url),
+    await answer_capture(
+        message,
+        message.text.strip()[:4000],
+        "Перенёс текст в DailyOS. Открой AI-разбор и подтверди задачи перед сохранением.",
     )
-    await message.answer(
-        ("Перенесу мысль в AI-разбор. Ты подтвердишь задачи перед сохранением."
-         if can_transfer else
-          "Сообщение длинное: открой DailyOS и вставь его в AI-разбор. Так текст не обрежется."),
-        reply_markup=keyboard.as_markup(),
-    )
+
+
+@dp.message(F.voice)
+async def capture_voice(message: types.Message):
+    if not GROQ_API_KEY:
+        await message.answer("Голосовой разбор требует GROQ_API_KEY в Render.")
+        return
+    try:
+        file = BytesIO()
+        await bot.download(message.voice.file_id, destination=file)
+        text = await groq_transcribe_voice(file.getvalue())
+    except Exception as exc:
+        await message.answer(str(exc))
+        return
+    await answer_capture(message, text, "Голос распознан. Открой DailyOS и преврати его в задачи.")
+
+
+@dp.message(F.photo)
+async def capture_photo(message: types.Message):
+    if not GROQ_API_KEY:
+        await message.answer("Разбор скриншотов требует GROQ_API_KEY в Render.")
+        return
+    try:
+        file = BytesIO()
+        await bot.download(message.photo[-1].file_id, destination=file)
+        text = await groq_read_image(file.getvalue())
+    except Exception as exc:
+        await message.answer(str(exc))
+        return
+    await answer_capture(message, text, "Скриншот прочитан. Открой DailyOS и подтверди найденные задачи.")
 
 
 async def index(_request: web.Request):
@@ -132,6 +238,17 @@ async def index(_request: web.Request):
 
 async def health(_request: web.Request):
     return web.json_response({"status": "ok", "ai": bool(GROQ_API_KEY), "provider": "groq"})
+
+
+async def capture(request: web.Request):
+    try:
+        user = validate_init_data(request.headers.get("X-Telegram-Init-Data", ""))
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    text = pop_capture(request.match_info["capture_id"], user["id"])
+    if text is None:
+        raise web.HTTPNotFound(text="Разбор устарел. Отправь сообщение боту ещё раз.")
+    return web.json_response({"text": text})
 
 
 async def ai(request: web.Request):
@@ -200,7 +317,12 @@ async def cleanup(app: web.Application):
 def main():
     app = web.Application(client_max_size=32 * 1024)
     app["rate_limits"] = defaultdict(deque)
-    app.add_routes([web.get("/", index), web.get("/health", health), web.post("/api/ai", ai)])
+    app.add_routes([
+        web.get("/", index),
+        web.get("/health", health),
+        web.get("/api/capture/{capture_id}", capture),
+        web.post("/api/ai", ai),
+    ])
     SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(app, path=WEBHOOK_PATH)
     setup_application(app, dp, bot=bot)
     app.on_startup.append(startup)
