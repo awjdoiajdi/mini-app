@@ -86,9 +86,17 @@ def ai_messages(action: str, payload: dict) -> list[dict[str, str]]:
         "chat": (
             "Ответь как личный AI-помощник по задачам и дню пользователя. Видишь только переданный контекст. "
             "Если пользователь просит создать задачи или в сообщении есть явные дела, предложи их в tasks. "
+            "Если режим rescue, предложи plan с taskId и date/time/delete/done только для переданных задач. "
+            "Если речь про еду, верни один recipe. "
             "Верни JSON: {\"reply\":\"...\",\"tasks\":[{\"title\":\"...\",\"date\":\"YYYY-MM-DD\","
             "\"time\":\"HH:MM\",\"duration\":30,\"priority\":\"medium\",\"energy\":\"medium\","
-            "\"category\":\"Личное\"}]}. priority и energy: low, medium или high. Без воды."
+            "\"category\":\"Личное\"}],\"recipe\":null,\"plan\":[]}. priority и energy: low, medium или high. Без воды."
+        ),
+        "recipe": (
+            "Предложи 3 блюда из продуктов пользователя. Учитывай простоту, обычную домашнюю кухню и что можно докупить. "
+            "Верни JSON: {\"message\":\"...\",\"recipes\":[{\"title\":\"...\",\"time\":\"25 мин\","
+            "\"difficulty\":\"легко\",\"calories\":\"примерно 500 ккал\",\"ingredients\":[\"...\"],"
+            "\"shopping\":[\"...\"],\"steps\":[\"...\"]}]}. Не выдумывай дорогие продукты без нужды."
         ),
     }
     if action not in prompts:
@@ -195,6 +203,27 @@ async def groq_read_image(data: bytes) -> str:
             return (await response.json())["choices"][0]["message"]["content"].strip()
 
 
+async def groq_fridge_photo(data: bytes):
+    image = base64.b64encode(data).decode()
+    payload = {
+        "model": os.environ.get("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"),
+        "temperature": 0.2,
+        "max_tokens": 1400,
+        "messages": [
+            {"role": "system", "content": ai_messages("recipe", {})[0]["content"]},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Определи продукты на фото и предложи блюда."},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image}"}},
+            ]},
+        ],
+    }
+    async with ClientSession(timeout=ClientTimeout(total=60)) as session:
+        async with session.post(AI_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, json=payload) as response:
+            if response.status != 200:
+                raise RuntimeError(f"Groq не разобрал продукты ({response.status})")
+            return parse_ai_json((await response.json())["choices"][0]["message"]["content"])
+
+
 async def answer_capture(message: types.Message, text: str, title: str):
     if not text.strip():
         await message.answer("Не вижу текста для разбора. Отправь сообщение, голос или скриншот с задачами.")
@@ -277,6 +306,26 @@ async def capture(request: web.Request):
     return web.json_response({"text": text})
 
 
+async def fridge_photo(request: web.Request):
+    if not GROQ_API_KEY:
+        raise web.HTTPServiceUnavailable(text="GROQ_API_KEY не настроен")
+    try:
+        validate_init_data(request.headers.get("X-Telegram-Init-Data", ""))
+        reader = await request.multipart()
+        field = await reader.next()
+        if not field or field.name != "photo":
+            raise ValueError("Фото не найдено")
+        data = await field.read(decode=False)
+        if len(data) > 5_000_000:
+            raise ValueError("Фото больше 5 МБ")
+        result = await groq_fridge_photo(data)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    except RuntimeError as exc:
+        raise web.HTTPBadGateway(text=str(exc)) from exc
+    return web.json_response({"result": result})
+
+
 async def ai(request: web.Request):
     if not GROQ_API_KEY:
         raise web.HTTPServiceUnavailable(text="GROQ_API_KEY не настроен")
@@ -341,12 +390,13 @@ async def cleanup(app: web.Application):
 
 
 def main():
-    app = web.Application(client_max_size=32 * 1024)
+    app = web.Application(client_max_size=6 * 1024 * 1024)
     app["rate_limits"] = defaultdict(deque)
     app.add_routes([
         web.get("/", index),
         web.get("/health", health),
         web.get("/api/capture/{capture_id}", capture),
+        web.post("/api/fridge/photo", fridge_photo),
         web.post("/api/ai", ai),
     ])
     SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(app, path=WEBHOOK_PATH)
