@@ -87,7 +87,8 @@ def ai_messages(action: str, payload: dict) -> list[dict[str, str]]:
             "Ответь как личный AI-помощник по задачам и дню пользователя. Видишь только переданный контекст. "
             "Если пользователь просит создать задачи или в сообщении есть явные дела, предложи их в tasks. "
             "Если режим rescue, предложи plan с taskId и date/time/delete/done только для переданных задач. "
-            "Если речь про еду, верни один recipe. "
+            "Если речь про еду или рецепт, recipe обязан содержать title, time, difficulty, ingredients и steps; "
+            "не пиши 'вот рецепт' без заполненного recipe. "
             "Верни JSON: {\"reply\":\"...\",\"tasks\":[{\"title\":\"...\",\"date\":\"YYYY-MM-DD\","
             "\"time\":\"HH:MM\",\"duration\":30,\"priority\":\"medium\",\"energy\":\"medium\","
             "\"category\":\"Личное\"}],\"recipe\":null,\"plan\":[]}. priority и energy: low, medium или high. Без воды."
@@ -381,6 +382,7 @@ async def ai(request: web.Request):
                 "messages": messages,
                 "temperature": 0.25,
                 "max_tokens": 1400,
+                "response_format": {"type": "json_object"},
             },
         ) as response:
             if response.status != 200:
