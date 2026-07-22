@@ -56,11 +56,6 @@ def validate_init_data(init_data: str, token: str = BOT_TOKEN, max_age: int = 86
 
 def ai_messages(action: str, payload: dict) -> list[dict[str, str]]:
     prompts = {
-        "brief": (
-            "Сделай утренний или текущий briefing по данным пользователя. Верни JSON: "
-            "{\"headline\":\"...\",\"risk\":\"...\",\"nextMove\":\"...\",\"praise\":\"...\","
-            "\"tips\":[\"...\",\"...\"]}. Без воды, как личный оператор."
-        ),
         "plan": (
             "Составь реалистичный план дня. Учитывай время, приоритет, энергию и длительность. "
             "Не меняй taskId. Верни JSON: {\"summary\":\"...\",\"schedule\":[{\"taskId\":\"...\","
@@ -103,11 +98,11 @@ def parse_ai_json(content: str):
 @dp.message(CommandStart())
 async def start(message: types.Message):
     keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="Открыть Command Center", web_app=WebAppInfo(url=APP_URL))
+    keyboard.button(text="Открыть DailyOS", web_app=WebAppInfo(url=APP_URL))
     name = html.escape(message.from_user.first_name) if message.from_user else "друг"
     await message.answer(
-        f"<b>DailyOS Command Center</b>\n\nПривет, {name}! Это личный оператор дня: миссии, привычки, "
-        "AI-разбор мыслей, фокус-сессии и честный отчёт по прогрессу.\n\nОтправь мысль обычным сообщением или открой центр управления.",
+        f"<b>DailyOS</b>\n\nПривет, {name}! Это приложение для задач, привычек и фокус-сессий "
+        "с AI-планированием дня.\n\nОтправь мысль обычным сообщением или открой приложение.",
         reply_markup=keyboard.as_markup(),
     )
 
@@ -120,13 +115,13 @@ async def capture_message(message: types.Message):
     url = f"{APP_URL}{separator}capture={quote(text)}" if can_transfer else APP_URL
     keyboard = InlineKeyboardBuilder()
     keyboard.button(
-        text="Разобрать в Command Center",
+        text="Разобрать в DailyOS",
         web_app=WebAppInfo(url=url),
     )
     await message.answer(
         ("Перенесу мысль в AI-разбор. Ты подтвердишь задачи перед сохранением."
          if can_transfer else
-         "Сообщение длинное: открой DailyOS и вставь его в AI Inbox. Так текст не обрежется."),
+          "Сообщение длинное: открой DailyOS и вставь его в AI-разбор. Так текст не обрежется."),
         reply_markup=keyboard.as_markup(),
     )
 
