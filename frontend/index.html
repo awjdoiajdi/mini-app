@@ -1,0 +1,884 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#090a0d">
+  <meta name="color-scheme" content="dark">
+  <title>DailyOS</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: #090a0d;
+      --surface: #111318;
+      --surface-2: #181b21;
+      --surface-3: #20232b;
+      --line: rgba(255,255,255,.08);
+      --line-strong: rgba(255,255,255,.14);
+      --text: #f4f3ee;
+      --muted: #898d98;
+      --accent: #d9ff72;
+      --accent-2: #9f8cff;
+      --blue: #78c8ff;
+      --red: #ff7188;
+      --amber: #f6bd60;
+      --green: #77e6a4;
+      --nav-height: 78px;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    * { box-sizing: border-box; margin: 0; }
+    html, body { min-height: 100%; background: var(--bg); }
+    body {
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior: none;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: -20%;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 88% 4%, rgba(159,140,255,.16), transparent 23%),
+        radial-gradient(circle at 2% 37%, rgba(217,255,114,.07), transparent 25%);
+      filter: blur(8px);
+    }
+    button, input, textarea, select { font: inherit; }
+    button { color: inherit; border: 0; cursor: pointer; }
+    input, textarea, select { color: var(--text); }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+    .shell { width: min(100%, 760px); min-height: 100vh; margin: 0 auto; position: relative; }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: calc(14px + env(safe-area-inset-top, 0px)) 18px 12px;
+      background: linear-gradient(180deg, rgba(9,10,13,.96) 70%, transparent);
+      backdrop-filter: blur(16px);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 11px;
+      display: grid;
+      place-items: center;
+      color: #111408;
+      font-weight: 900;
+      font-size: 13px;
+      letter-spacing: -1px;
+      background: var(--accent);
+      box-shadow: 0 8px 28px rgba(217,255,114,.14);
+      transform: rotate(-4deg);
+    }
+    .brand-name { font-weight: 820; letter-spacing: -.5px; font-size: 15px; }
+    .local-pill { display: flex; align-items: center; gap: 5px; margin-top: 2px; color: var(--muted); font-size: 9px; letter-spacing: .9px; text-transform: uppercase; }
+    .local-pill i { width: 5px; height: 5px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .profile-button {
+      width: 38px;
+      height: 38px;
+      border-radius: 13px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(145deg, #353044, #201f2b);
+      border: 1px solid var(--line-strong);
+      font-weight: 800;
+      font-size: 13px;
+    }
+    main { padding: 8px 16px calc(var(--nav-height) + var(--safe-bottom) + 34px); }
+    .page { animation: reveal .32s cubic-bezier(.2,.75,.2,1); }
+    .page-head { margin: 12px 2px 24px; }
+    .eyebrow { color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: 1.7px; text-transform: uppercase; }
+    h1 { margin-top: 7px; font-size: clamp(31px, 8vw, 44px); line-height: .98; letter-spacing: -2px; font-weight: 820; }
+    .subtitle { margin-top: 10px; max-width: 520px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    h2 { font-size: 18px; line-height: 1.2; letter-spacing: -.5px; }
+    .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 27px 2px 12px; }
+    .section-head span { color: var(--muted); font-size: 11px; }
+    .link-button { background: transparent; color: var(--accent); font-size: 12px; padding: 5px 0; }
+
+    .hero-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(130px, .7fr); gap: 10px; }
+    .hero-card, .score-card, .card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background: rgba(17,19,24,.9);
+      box-shadow: 0 16px 50px rgba(0,0,0,.18);
+    }
+    .hero-card { min-height: 210px; border-radius: 27px; padding: 21px; background: linear-gradient(145deg, rgba(31,34,43,.98), rgba(15,17,22,.97)); }
+    .hero-card::after {
+      content: "";
+      position: absolute;
+      width: 180px;
+      height: 180px;
+      right: -70px;
+      top: -78px;
+      border-radius: 50%;
+      background: var(--accent);
+      opacity: .1;
+      filter: blur(4px);
+    }
+    .hero-kicker { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
+    .hero-kicker svg { width: 15px; height: 15px; color: var(--accent); }
+    .hero-title { max-width: 390px; margin-top: 20px; font-size: clamp(24px, 6vw, 33px); line-height: 1.03; letter-spacing: -1.25px; font-weight: 760; }
+    .hero-title em { color: var(--accent); font-style: normal; }
+    .hero-foot { position: absolute; left: 21px; right: 21px; bottom: 20px; display: flex; align-items: center; gap: 12px; }
+    .progress-track { flex: 1; height: 5px; overflow: hidden; border-radius: 99px; background: rgba(255,255,255,.09); }
+    .progress-track i { display: block; width: var(--progress); height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent-2), var(--accent)); transition: width .4s ease; }
+    .progress-copy { color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .score-card { border-radius: 27px; padding: 17px 14px; display: flex; flex-direction: column; justify-content: space-between; }
+    .score-label { color: var(--muted); font-size: 10px; letter-spacing: .8px; text-transform: uppercase; }
+    .score-number { font-size: 48px; line-height: 1; letter-spacing: -3px; font-weight: 780; }
+    .score-number small { color: var(--muted); font-size: 14px; letter-spacing: 0; }
+    .score-note { color: var(--muted); font-size: 10px; line-height: 1.4; }
+    .score-dots { display: flex; gap: 4px; }
+    .score-dots i { width: 100%; height: 3px; border-radius: 4px; background: rgba(255,255,255,.1); }
+    .score-dots i.on { background: var(--accent); }
+
+    .capture {
+      margin-top: 11px;
+      display: flex;
+      gap: 9px;
+      padding: 9px;
+      border-radius: 19px;
+      border: 1px solid var(--line);
+      background: rgba(17,19,24,.82);
+    }
+    .capture-icon { width: 38px; height: 38px; flex: none; display: grid; place-items: center; color: var(--accent-2); }
+    .capture input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; font-size: 13px; }
+    .capture input::placeholder { color: #666b76; }
+    .capture button { width: 40px; height: 40px; flex: none; border-radius: 13px; display: grid; place-items: center; background: var(--text); color: #101115; }
+    .capture button svg { width: 18px; height: 18px; }
+
+    .ai-card {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 17px;
+      border: 1px solid rgba(159,140,255,.3);
+      border-radius: 21px;
+      background: linear-gradient(120deg, rgba(159,140,255,.13), rgba(217,255,114,.045));
+    }
+    .ai-orb { width: 45px; height: 45px; flex: none; border-radius: 15px; display: grid; place-items: center; background: linear-gradient(145deg, var(--accent-2), #7462df); box-shadow: 0 10px 24px rgba(159,140,255,.22); }
+    .ai-orb svg { width: 21px; height: 21px; }
+    .ai-copy { min-width: 0; flex: 1; }
+    .ai-copy b { display: block; font-size: 13px; letter-spacing: -.2px; }
+    .ai-copy span { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+    .ai-card > button { padding: 9px 12px; border-radius: 11px; background: rgba(255,255,255,.09); font-size: 11px; font-weight: 700; white-space: nowrap; }
+
+    .timeline { display: grid; gap: 8px; }
+    .task {
+      position: relative;
+      display: grid;
+      grid-template-columns: auto minmax(0,1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 13px 13px 13px 12px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(17,19,24,.84);
+      transition: opacity .2s, transform .2s, border-color .2s;
+    }
+    .task:active { transform: scale(.99); }
+    .task.overdue { border-color: rgba(255,113,136,.23); }
+    .task.done { opacity: .46; }
+    .task.done .task-title { text-decoration: line-through; }
+    .check {
+      width: 25px;
+      height: 25px;
+      border-radius: 9px;
+      display: grid;
+      place-items: center;
+      background: transparent;
+      border: 1px solid rgba(255,255,255,.2);
+    }
+    .check svg { width: 14px; height: 14px; opacity: 0; }
+    .task.done .check { color: #10130b; border-color: var(--accent); background: var(--accent); }
+    .task.done .check svg { opacity: 1; }
+    .task-main { min-width: 0; background: transparent; text-align: left; padding: 0; }
+    .task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 680; letter-spacing: -.1px; }
+    .task-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; color: var(--muted); font-size: 9px; }
+    .task-meta i { width: 3px; height: 3px; border-radius: 50%; background: #555a65; }
+    .priority-high { color: var(--red); }
+    .priority-medium { color: var(--amber); }
+    .priority-low { color: var(--blue); }
+    .task-time { width: 45px; text-align: right; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .task-time b { display: block; color: var(--text); font-size: 11px; }
+    .sub-progress { margin-top: 7px; height: 2px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,.08); }
+    .sub-progress i { display: block; height: 100%; background: var(--accent-2); }
+    .empty { padding: 34px 20px; text-align: center; border: 1px dashed var(--line-strong); border-radius: 20px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .empty-icon { width: 43px; height: 43px; margin: 0 auto 12px; border-radius: 14px; display: grid; place-items: center; color: var(--accent); background: rgba(217,255,114,.08); }
+    .empty b { display: block; margin-bottom: 5px; color: var(--text); font-size: 14px; }
+
+    .toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+    .search { position: relative; min-width: 0; flex: 1; }
+    .search svg { position: absolute; left: 13px; top: 50%; width: 16px; height: 16px; color: var(--muted); transform: translateY(-50%); }
+    .search input { width: 100%; height: 44px; padding: 0 13px 0 39px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); outline: 0; font-size: 12px; }
+    .square-button { width: 44px; height: 44px; flex: none; border-radius: 14px; display: grid; place-items: center; background: var(--surface); border: 1px solid var(--line); }
+    .chips { display: flex; gap: 7px; overflow-x: auto; scrollbar-width: none; margin: 0 -16px 15px; padding: 0 16px; }
+    .chips::-webkit-scrollbar { display: none; }
+    .chip { flex: none; padding: 8px 12px; border-radius: 999px; color: var(--muted); border: 1px solid var(--line); background: rgba(17,19,24,.78); font-size: 10px; }
+    .chip.active { color: #111408; border-color: var(--accent); background: var(--accent); font-weight: 760; }
+    .date-group { margin-top: 18px; }
+    .date-group-title { display: flex; align-items: center; justify-content: space-between; margin: 0 3px 9px; color: var(--muted); font-size: 10px; letter-spacing: .6px; text-transform: uppercase; }
+
+    .focus-panel { padding: 24px 19px 20px; border: 1px solid var(--line); border-radius: 30px; background: linear-gradient(160deg, #1c1f27, #101217 65%); text-align: center; overflow: hidden; position: relative; }
+    .focus-panel::before { content: ""; position: absolute; width: 220px; height: 220px; top: -145px; left: calc(50% - 110px); border-radius: 50%; background: var(--accent-2); opacity: .17; filter: blur(18px); }
+    .focus-status { position: relative; color: var(--accent); font-size: 9px; font-weight: 800; letter-spacing: 1.6px; text-transform: uppercase; }
+    .timer { position: relative; margin: 24px 0 14px; font-size: clamp(65px, 20vw, 104px); line-height: .88; letter-spacing: -6px; font-weight: 750; font-variant-numeric: tabular-nums; }
+    .focus-task { max-width: 400px; margin: 0 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+    .timer-presets { display: flex; justify-content: center; gap: 7px; margin-top: 20px; }
+    .timer-presets button { padding: 7px 11px; border-radius: 10px; color: var(--muted); background: rgba(255,255,255,.06); font-size: 10px; }
+    .timer-presets button.active { color: var(--text); background: rgba(255,255,255,.13); }
+    .focus-controls { display: flex; align-items: center; justify-content: center; gap: 13px; margin-top: 23px; }
+    .control-small { width: 45px; height: 45px; border-radius: 15px; display: grid; place-items: center; background: rgba(255,255,255,.07); }
+    .control-main { width: 62px; height: 62px; border-radius: 21px; display: grid; place-items: center; color: #111408; background: var(--accent); box-shadow: 0 12px 30px rgba(217,255,114,.18); }
+    .control-main svg { width: 24px; height: 24px; fill: currentColor; }
+    .focus-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 11px; }
+    .mini-stat { padding: 14px 9px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface); }
+    .mini-stat b { display: block; font-size: 20px; letter-spacing: -1px; }
+    .mini-stat span { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }
+    .focus-queue { display: grid; gap: 7px; }
+    .queue-item { display: flex; align-items: center; gap: 11px; width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); text-align: left; }
+    .queue-item.active { border-color: rgba(217,255,114,.33); background: rgba(217,255,114,.055); }
+    .queue-index { width: 25px; color: var(--muted); font-size: 10px; }
+    .queue-copy { min-width: 0; flex: 1; }
+    .queue-copy b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+    .queue-copy span { color: var(--muted); font-size: 9px; }
+
+    .insight-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 9px; }
+    .metric { min-height: 126px; padding: 16px; border: 1px solid var(--line); border-radius: 21px; background: var(--surface); }
+    .metric.wide { grid-column: 1 / -1; }
+    .metric-label { color: var(--muted); font-size: 9px; letter-spacing: .8px; text-transform: uppercase; }
+    .metric-value { margin-top: 15px; font-size: 35px; line-height: 1; letter-spacing: -2px; font-weight: 760; }
+    .metric-value small { color: var(--muted); font-size: 11px; letter-spacing: 0; }
+    .metric-note { margin-top: 9px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+    .week-chart { display: flex; align-items: end; gap: 8px; height: 130px; margin-top: 18px; }
+    .day-bar { min-width: 0; flex: 1; display: flex; align-items: center; flex-direction: column; justify-content: end; gap: 7px; height: 100%; }
+    .day-bar i { width: min(25px, 70%); min-height: 4px; border-radius: 8px 8px 3px 3px; background: linear-gradient(180deg, var(--accent), rgba(217,255,114,.2)); }
+    .day-bar span { color: var(--muted); font-size: 8px; text-transform: uppercase; }
+    .day-bar.today span { color: var(--accent); }
+    .category-list { display: grid; gap: 13px; margin-top: 18px; }
+    .category-row { display: grid; grid-template-columns: 72px 1fr 26px; align-items: center; gap: 8px; font-size: 9px; }
+    .category-row span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+    .category-row b { text-align: right; font-size: 9px; }
+    .category-track { height: 4px; border-radius: 5px; overflow: hidden; background: rgba(255,255,255,.07); }
+    .category-track i { display: block; height: 100%; border-radius: inherit; background: var(--accent-2); }
+    .privacy-card { display: flex; gap: 12px; align-items: center; margin-top: 10px; padding: 15px; border: 1px solid rgba(119,230,164,.17); border-radius: 18px; background: rgba(119,230,164,.045); }
+    .privacy-card svg { flex: none; color: var(--green); }
+    .privacy-card b { display: block; font-size: 11px; }
+    .privacy-card span { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.45; }
+
+    .bottom-nav {
+      position: fixed;
+      z-index: 30;
+      left: 50%;
+      bottom: 0;
+      width: min(100%, 760px);
+      height: calc(var(--nav-height) + var(--safe-bottom));
+      padding: 8px 12px calc(8px + var(--safe-bottom));
+      display: grid;
+      grid-template-columns: repeat(4,1fr);
+      transform: translateX(-50%);
+      background: linear-gradient(180deg, rgba(9,10,13,.25), rgba(9,10,13,.97) 28%);
+      backdrop-filter: blur(20px);
+    }
+    .nav-button { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 4px; color: #646975; background: transparent; font-size: 8px; }
+    .nav-button svg { width: 19px; height: 19px; }
+    .nav-button.active { color: var(--text); }
+    .nav-button.active svg { color: var(--accent); filter: drop-shadow(0 0 7px rgba(217,255,114,.28)); }
+    .fab {
+      position: fixed;
+      z-index: 29;
+      right: max(18px, calc((100vw - 760px)/2 + 18px));
+      bottom: calc(var(--nav-height) + var(--safe-bottom) + 13px);
+      width: 54px;
+      height: 54px;
+      border-radius: 18px;
+      display: grid;
+      place-items: center;
+      color: #10130b;
+      background: var(--accent);
+      box-shadow: 0 14px 35px rgba(0,0,0,.42), 0 8px 25px rgba(217,255,114,.15);
+    }
+    .fab svg { width: 23px; height: 23px; }
+    .fab:active { transform: scale(.94); }
+
+    .backdrop { position: fixed; z-index: 50; inset: 0; display: flex; align-items: end; justify-content: center; background: rgba(0,0,0,.64); backdrop-filter: blur(9px); animation: fade .2s ease; }
+    .sheet { width: min(100%, 760px); max-height: min(92vh, 880px); overflow-y: auto; padding: 10px 17px calc(22px + var(--safe-bottom)); border: 1px solid var(--line-strong); border-bottom: 0; border-radius: 29px 29px 0 0; background: #111318; box-shadow: 0 -25px 70px rgba(0,0,0,.45); animation: sheetUp .28s cubic-bezier(.2,.8,.2,1); }
+    .handle { width: 37px; height: 4px; margin: 0 auto 14px; border-radius: 5px; background: #343740; }
+    .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 22px; }
+    .sheet-head h2 { font-size: 20px; }
+    .close-button { width: 35px; height: 35px; flex: none; display: grid; place-items: center; border-radius: 12px; background: var(--surface-3); }
+    .close-button svg { width: 16px; height: 16px; }
+    .field { margin-bottom: 16px; }
+    .field label { display: block; margin: 0 2px 7px; color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: 1px; text-transform: uppercase; }
+    .input { width: 100%; min-height: 46px; padding: 12px 13px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-2); outline: 0; font-size: 12px; }
+    textarea.input { min-height: 80px; resize: vertical; line-height: 1.45; }
+    select.input { appearance: none; background-image: linear-gradient(45deg,transparent 50%,#777 50%),linear-gradient(135deg,#777 50%,transparent 50%); background-position: calc(100% - 17px) 20px,calc(100% - 12px) 20px; background-size: 5px 5px; background-repeat: no-repeat; }
+    .form-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 0 10px; }
+    .option-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; }
+    .option { min-height: 42px; padding: 9px 6px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: var(--surface-2); font-size: 10px; }
+    .option.active { color: var(--text); border-color: rgba(217,255,114,.45); background: rgba(217,255,114,.07); }
+    .primary { width: 100%; min-height: 49px; padding: 13px; border-radius: 15px; color: #111408; background: var(--accent); font-size: 12px; font-weight: 800; }
+    .secondary { width: 100%; min-height: 45px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-2); font-size: 11px; font-weight: 700; }
+    .danger { color: var(--red); }
+    .form-actions { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 6px; }
+    .form-actions .primary { padding-inline: 25px; }
+    .icon-action { width: 49px; min-height: 49px; display: grid; place-items: center; border-radius: 15px; background: rgba(255,113,136,.08); color: var(--red); }
+    .subtask-list { display: grid; gap: 7px; margin-bottom: 14px; }
+    .subtask { display: flex; align-items: center; gap: 9px; padding: 10px; border-radius: 12px; background: var(--surface-2); font-size: 10px; }
+    .subtask button { width: 20px; height: 20px; flex: none; border-radius: 7px; border: 1px solid var(--line-strong); background: transparent; }
+    .subtask.done { color: var(--muted); text-decoration: line-through; }
+    .subtask.done button { border-color: var(--accent); background: var(--accent); }
+    .ai-result { padding: 14px; border: 1px solid rgba(159,140,255,.23); border-radius: 17px; background: rgba(159,140,255,.07); }
+    .ai-result > b { font-size: 12px; }
+    .ai-result > p { margin-top: 6px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .plan-list { display: grid; gap: 7px; margin: 14px 0; }
+    .plan-row { display: grid; grid-template-columns: 42px 1fr; gap: 10px; padding: 10px; border-radius: 12px; background: rgba(0,0,0,.18); }
+    .plan-time { color: var(--accent); font-size: 11px; font-weight: 750; }
+    .plan-row b { display: block; font-size: 10px; }
+    .plan-row span { display: block; margin-top: 3px; color: var(--muted); font-size: 8px; line-height: 1.4; }
+    .loading { padding: 35px 10px; text-align: center; color: var(--muted); font-size: 11px; }
+    .loader { width: 40px; height: 40px; margin: 0 auto 14px; border: 2px solid rgba(255,255,255,.08); border-top-color: var(--accent-2); border-radius: 50%; animation: spin .8s linear infinite; }
+    .settings-list { display: grid; gap: 8px; }
+    .settings-button { width: 100%; display: flex; align-items: center; gap: 11px; padding: 13px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface-2); text-align: left; }
+    .settings-button svg { width: 18px; height: 18px; color: var(--muted); }
+    .settings-button div { min-width: 0; flex: 1; }
+    .settings-button b { display: block; font-size: 10px; }
+    .settings-button span { display: block; margin-top: 3px; color: var(--muted); font-size: 8px; }
+    .settings-user { display: flex; align-items: center; gap: 12px; padding: 14px; margin-bottom: 15px; border-radius: 18px; background: linear-gradient(120deg, rgba(159,140,255,.12), rgba(255,255,255,.02)); }
+    .settings-avatar { width: 43px; height: 43px; display: grid; place-items: center; border-radius: 15px; color: #111408; background: var(--accent); font-weight: 850; }
+    .settings-user b { display: block; font-size: 13px; }
+    .settings-user span { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+    .toast { position: fixed; z-index: 80; left: 50%; bottom: calc(var(--nav-height) + var(--safe-bottom) + 12px); max-width: calc(100% - 30px); padding: 11px 15px; border: 1px solid var(--line-strong); border-radius: 13px; background: rgba(31,34,42,.96); box-shadow: 0 15px 40px rgba(0,0,0,.3); opacity: 0; pointer-events: none; transform: translate(-50%, 12px); transition: .24s ease; font-size: 10px; text-align: center; }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    .hidden { display: none !important; }
+
+    @keyframes reveal { from { opacity: 0; transform: translateY(8px); } }
+    @keyframes fade { from { opacity: 0; } }
+    @keyframes sheetUp { from { transform: translateY(40px); opacity: .5; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 390px) {
+      .hero-card { min-height: 200px; padding: 18px; }
+      .hero-foot { left: 18px; right: 18px; }
+      .score-number { font-size: 42px; }
+      .ai-card { gap: 10px; padding: 14px; }
+      .ai-orb { width: 40px; height: 40px; }
+      .ai-card > button { padding: 8px; }
+    }
+    @media (min-width: 680px) {
+      main { padding-inline: 24px; }
+      .topbar { padding-inline: 26px; }
+      .sheet { padding-inline: 25px; }
+      .fab { right: calc((100vw - 760px)/2 + 24px); }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+  </style>
+</head>
+<body>
+  <svg aria-hidden="true" width="0" height="0" style="position:absolute">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></symbol>
+    <symbol id="i-checks" viewBox="0 0 24 24"><path d="m3 12 3 3 5-6M13 6h8M13 12h8M13 18h8M3 18l2 2 4-4"/></symbol>
+    <symbol id="i-focus" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2V1M12 23v-1M2 12H1M23 12h-1"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5ZM19 16l.7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7Z"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4 4v6h6M5.5 15a8 8 0 1 0 .5-7"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H3v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6V3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+    <symbol id="i-wand" viewBox="0 0 24 24"><path d="m15 4 5 5L8 21H3v-5ZM14 5l5 5M6 3v4M4 5h4M19 16v5M16.5 18.5h5"/></symbol>
+  </svg>
+
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">D/</div>
+        <div><div class="brand-name">DailyOS</div><div class="local-pill"><i></i> local private</div></div>
+      </div>
+      <button class="profile-button" data-action="settings" aria-label="Настройки" id="profile-button">D</button>
+    </header>
+    <main id="app"></main>
+  </div>
+
+  <button class="fab" data-action="new-task" aria-label="Добавить задачу"><svg><use href="#i-plus"/></svg></button>
+  <nav class="bottom-nav" aria-label="Основная навигация">
+    <button class="nav-button active" data-view="today"><svg><use href="#i-home"/></svg><span>Сегодня</span></button>
+    <button class="nav-button" data-view="tasks"><svg><use href="#i-checks"/></svg><span>Задачи</span></button>
+    <button class="nav-button" data-view="focus"><svg><use href="#i-focus"/></svg><span>Фокус</span></button>
+    <button class="nav-button" data-view="insights"><svg><use href="#i-chart"/></svg><span>Итоги</span></button>
+  </nav>
+  <div id="modal"></div>
+  <div id="toast" class="toast" role="status"></div>
+  <input id="import-file" type="file" accept="application/json" class="hidden">
+
+  <script>
+    const TG = window.Telegram?.WebApp;
+    TG?.ready();
+    TG?.expand();
+    TG?.setHeaderColor?.('#090a0d');
+    TG?.setBackgroundColor?.('#090a0d');
+
+    const USER = TG?.initDataUnsafe?.user;
+    const USER_ID = String(USER?.id || 'guest');
+    const STORAGE_KEY = `dailyos.v2.${USER_ID}`;
+    const CATEGORIES = ['Работа', 'Личное', 'Здоровье', 'Учёба', 'Дом', 'Другое'];
+    const PRIORITIES = { high: 'Высокий', medium: 'Средний', low: 'Низкий' };
+    const ENERGY = { high: 'Высокая', medium: 'Средняя', low: 'Низкая' };
+    const RECURRENCES = { none: 'Не повторять', daily: 'Каждый день', weekdays: 'По будням', weekly: 'Каждую неделю' };
+
+    let view = 'today';
+    let taskFilter = 'all';
+    let search = '';
+    let editingTaskId = null;
+    let aiResult = null;
+    let toastTimer;
+    let timerInterval;
+
+    const icon = name => `<svg aria-hidden="true"><use href="#i-${name}"></use></svg>`;
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const id = () => crypto.randomUUID?.() || `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+    const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+    const today = () => localDate();
+    const addDays = (date, days) => { const next = new Date(`${date}T12:00:00`); next.setDate(next.getDate() + days); return localDate(next); };
+    const dateOfTimestamp = timestamp => localDate(new Date(timestamp));
+    const formatDate = date => new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(new Date(`${date}T12:00:00`));
+    const dateTitle = date => date === today() ? 'Сегодня' : date === addDays(today(), 1) ? 'Завтра' : date < today() ? 'Просрочено' : new Intl.DateTimeFormat('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${date}T12:00:00`));
+    const nextRecurringDate = (date, recurrence) => {
+      let next = addDays(date || today(), recurrence === 'weekly' ? 7 : 1);
+      if (recurrence === 'weekdays') while ([0,6].includes(new Date(`${next}T12:00:00`).getDay())) next = addDays(next, 1);
+      return next;
+    };
+    console.assert(nextRecurringDate('2026-07-24', 'weekdays') === '2026-07-27', 'weekday recurrence check');
+
+    function blankData() {
+      return {
+        version: 2,
+        tasks: [],
+        focusSessions: [],
+        timer: { taskId: null, duration: 25, remaining: 1500, running: false, endsAt: 0 },
+        settings: { dayStart: '09:00', dayEnd: '20:00' }
+      };
+    }
+
+    function loadData() {
+      try {
+        const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+        if (stored?.version === 2 && Array.isArray(stored.tasks)) return { ...blankData(), ...stored, settings: { ...blankData().settings, ...stored.settings } };
+      } catch (_) {}
+
+      // ponytail: one-time migration preserves the previously shipped local task format.
+      try {
+        const old = JSON.parse(localStorage.getItem('dailyos.tasks') || '[]');
+        if (Array.isArray(old) && old.length) {
+          const migrated = blankData();
+          migrated.tasks = old.map(task => ({
+            id: task.id || id(), title: task.name || 'Без названия', notes: '', date: task.date || today(), time: '',
+            duration: 30, category: CATEGORIES.find(category => category.toLowerCase().startsWith(String(task.category || ''))) || 'Личное',
+            project: '', priority: task.priority || 'medium', energy: 'medium', recurrence: 'none', done: Boolean(task.done),
+            createdAt: Date.now(), completedAt: task.completedAt || null, subtasks: []
+          }));
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+          return migrated;
+        }
+      } catch (_) {}
+      return blankData();
+    }
+
+    let data = loadData();
+    function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+    function haptic(type = 'selection') {
+      if (type === 'success') TG?.HapticFeedback?.notificationOccurred('success');
+      else TG?.HapticFeedback?.selectionChanged();
+    }
+    function notify(message) {
+      const toast = document.querySelector('#toast');
+      toast.textContent = message;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+    function firstName() { return USER?.first_name || 'твой'; }
+    function initial() { return (USER?.first_name || 'D').slice(0,1).toUpperCase(); }
+    function dayGreeting() { const hour = new Date().getHours(); return hour < 6 ? 'Тихой ночи' : hour < 12 ? 'Доброе утро' : hour < 18 ? 'Добрый день' : 'Добрый вечер'; }
+    function pendingTasks() { return data.tasks.filter(task => !task.done); }
+    function todayTasks() { return data.tasks.filter(task => task.date === today()); }
+    function completedToday() { return data.tasks.filter(task => task.done && task.completedAt && dateOfTimestamp(task.completedAt) === today()); }
+    function taskSort(a, b) {
+      const priority = { high: 0, medium: 1, low: 2 };
+      return (a.date || '9999').localeCompare(b.date || '9999') || (a.time || '99:99').localeCompare(b.time || '99:99') || priority[a.priority] - priority[b.priority];
+    }
+
+    function taskHTML(task) {
+      const subtasks = task.subtasks || [];
+      const subDone = subtasks.filter(item => item.done).length;
+      const overdue = !task.done && task.date && task.date < today();
+      return `<article class="task ${task.done ? 'done' : ''} ${overdue ? 'overdue' : ''}">
+        <button class="check" data-action="toggle-task" data-id="${esc(task.id)}" aria-label="${task.done ? 'Вернуть задачу' : 'Завершить задачу'}">${icon('check')}</button>
+        <button class="task-main" data-action="edit-task" data-id="${esc(task.id)}">
+          <div class="task-title">${esc(task.title)}</div>
+          <div class="task-meta"><span class="priority-${esc(task.priority)}">${overdue ? 'Просрочено' : PRIORITIES[task.priority]}</span><i></i><span>${esc(task.project || task.category)}</span><i></i><span>${Number(task.duration) || 30} мин</span>${task.recurrence !== 'none' ? `<i></i><span>↻ ${esc(RECURRENCES[task.recurrence])}</span>` : ''}</div>
+          ${subtasks.length ? `<div class="sub-progress"><i style="width:${Math.round(subDone / subtasks.length * 100)}%"></i></div>` : ''}
+        </button>
+        <div class="task-time">${task.time ? `<b>${esc(task.time)}</b>` : ''}${task.date && task.date !== today() ? esc(formatDate(task.date)) : ''}</div>
+      </article>`;
+    }
+
+    function emptyHTML(title, text) {
+      return `<div class="empty"><div class="empty-icon">${icon('spark')}</div><b>${esc(title)}</b>${esc(text)}</div>`;
+    }
+
+    function todayView() {
+      const tasks = todayTasks().sort(taskSort);
+      const done = tasks.filter(task => task.done).length;
+      const open = tasks.filter(task => !task.done);
+      const overdue = pendingTasks().filter(task => task.date && task.date < today()).sort(taskSort);
+      const percent = tasks.length ? Math.round(done / tasks.length * 100) : 0;
+      const date = new Intl.DateTimeFormat('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
+      const load = tasks.filter(task => !task.done).reduce((sum, task) => sum + Number(task.duration || 30), 0);
+      const score = tasks.length ? Math.max(0, Math.min(100, Math.round(percent * .8 + Math.max(0, 20 - open.length * 3)))) : 0;
+      return `<section class="page">
+        <div class="page-head"><div class="eyebrow">${esc(date)}</div><h1>${dayGreeting()},<br>${esc(firstName())}.</h1><p class="subtitle">Один ясный план сильнее десятка списков.</p></div>
+        <div class="hero-grid">
+          <div class="hero-card" style="--progress:${percent}%">
+            <div class="hero-kicker">${icon('focus')} Ритм дня · ${Math.round(load / 60 * 10) / 10} ч в плане</div>
+            <div class="hero-title">${tasks.length ? (open.length ? `Осталось <em>${open.length}</em> ${open.length === 1 ? 'дело' : 'дел'}.` : 'День <em>закрыт.</em>') : 'Собери свой <em>лучший день.</em>'}</div>
+            <div class="hero-foot"><div class="progress-track"><i></i></div><div class="progress-copy">${done} / ${tasks.length} готово</div></div>
+          </div>
+          <div class="score-card"><div class="score-label">Day score</div><div class="score-number">${score}<small>/100</small></div><div class="score-dots">${[20,40,60,80,100].map(level => `<i class="${score >= level ? 'on' : ''}"></i>`).join('')}</div><div class="score-note">${score >= 80 ? 'Сильный темп' : score >= 50 ? 'Хороший ритм' : 'Начни с одного шага'}</div></div>
+        </div>
+        <form class="capture" id="capture-form"><div class="capture-icon">${icon('spark')}</div><input id="capture-input" maxlength="700" autocomplete="off" placeholder="Сбрось мысли — AI разложит по задачам"><button aria-label="Разобрать с AI">${icon('arrow')}</button></form>
+        <div class="section-head"><h2>AI-оператор</h2><span>DeepSeek</span></div>
+        <section class="ai-card"><div class="ai-orb">${icon('wand')}</div><div class="ai-copy"><b>Собрать оптимальный план</b><span>Приоритеты, энергия, длительность и реальные часы дня.</span></div><button data-action="ai-plan">План дня</button></section>
+        ${overdue.length ? `<div class="section-head"><h2>Требует внимания</h2><span>${overdue.length}</span></div><div class="timeline">${overdue.slice(0,3).map(taskHTML).join('')}</div>` : ''}
+        <div class="section-head"><h2>Сегодня</h2><button class="link-button" data-view="tasks">Все задачи</button></div>
+        <div class="timeline">${tasks.length ? tasks.map(taskHTML).join('') : emptyHTML('План пока чист', 'Добавь задачу или опиши день одной фразой для AI.')}</div>
+      </section>`;
+    }
+
+    function tasksView() {
+      let tasks = [...data.tasks].sort(taskSort);
+      if (taskFilter === 'today') tasks = tasks.filter(task => task.date === today());
+      if (taskFilter === 'upcoming') tasks = tasks.filter(task => !task.done && task.date > today());
+      if (taskFilter === 'overdue') tasks = tasks.filter(task => !task.done && task.date < today());
+      if (taskFilter === 'done') tasks = tasks.filter(task => task.done);
+      if (search) tasks = tasks.filter(task => `${task.title} ${task.notes || ''} ${task.project || ''}`.toLowerCase().includes(search.toLowerCase()));
+      const groups = Object.groupBy ? Object.groupBy(tasks, task => task.date || 'Без даты') : tasks.reduce((result, task) => ((result[task.date || 'Без даты'] ||= []).push(task), result), {});
+      return `<section class="page">
+        <div class="page-head"><div class="eyebrow">Control center</div><h1>Все задачи.</h1><p class="subtitle">${pendingTasks().length} активных · ${data.tasks.filter(task => task.done).length} завершено за всё время</p></div>
+        <div class="toolbar"><label class="search">${icon('search')}<input id="task-search" value="${esc(search)}" placeholder="Найти задачу или проект"></label><button class="square-button" data-action="new-task" aria-label="Новая задача">${icon('plus')}</button></div>
+        <div class="chips">${[['all','Все'],['today','Сегодня'],['upcoming','Скоро'],['overdue','Просрочено'],['done','Готово']].map(([key,label]) => `<button class="chip ${taskFilter === key ? 'active' : ''}" data-filter="${key}">${label}</button>`).join('')}</div>
+        ${tasks.length ? Object.entries(groups).sort(([a],[b]) => a.localeCompare(b)).map(([date, list]) => `<section class="date-group"><div class="date-group-title"><span>${date === 'Без даты' ? date : dateTitle(date)}</span><span>${list.length}</span></div><div class="timeline">${list.map(taskHTML).join('')}</div></section>`).join('') : emptyHTML('Ничего не найдено', 'Смени фильтр или добавь новую задачу.')}
+      </section>`;
+    }
+
+    function timerRemaining() {
+      if (!data.timer.running) return Math.max(0, data.timer.remaining || data.timer.duration * 60);
+      return Math.max(0, Math.ceil((data.timer.endsAt - Date.now()) / 1000));
+    }
+    function formatTimer(seconds) { return `${String(Math.floor(seconds / 60)).padStart(2,'0')}:${String(seconds % 60).padStart(2,'0')}`; }
+    function selectedFocusTask() { return data.tasks.find(task => task.id === data.timer.taskId && !task.done) || todayTasks().find(task => !task.done) || pendingTasks().sort(taskSort)[0]; }
+
+    function focusView() {
+      const task = selectedFocusTask();
+      if (task && data.timer.taskId !== task.id) { data.timer.taskId = task.id; save(); }
+      const daySessions = data.focusSessions.filter(session => session.date === today());
+      const dayMinutes = daySessions.reduce((sum, session) => sum + session.minutes, 0);
+      const weekStart = addDays(today(), -6);
+      const weekMinutes = data.focusSessions.filter(session => session.date >= weekStart).reduce((sum, session) => sum + session.minutes, 0);
+      const queue = pendingTasks().sort(taskSort).slice(0, 5);
+      return `<section class="page">
+        <div class="page-head"><div class="eyebrow">Deep work</div><h1>Режим фокуса.</h1><p class="subtitle">Одна задача. Один таймер. Никакого шума.</p></div>
+        <section class="focus-panel"><div class="focus-status">${data.timer.running ? 'Сессия идёт' : 'Готов к старту'}</div><div class="timer" id="timer-value">${formatTimer(timerRemaining())}</div><div class="focus-task">${esc(task?.title || 'Сначала добавь задачу')}</div>
+          <div class="timer-presets">${[25,50,90].map(minutes => `<button class="${data.timer.duration === minutes ? 'active' : ''}" data-action="timer-preset" data-minutes="${minutes}" ${data.timer.running ? 'disabled' : ''}>${minutes} мин</button>`).join('')}</div>
+          <div class="focus-controls"><button class="control-small" data-action="timer-reset" aria-label="Сбросить">${icon('reset')}</button><button class="control-main" data-action="timer-toggle" aria-label="${data.timer.running ? 'Пауза' : 'Старт'}" ${task ? '' : 'disabled'}>${icon(data.timer.running ? 'pause' : 'play')}</button><button class="control-small" data-action="complete-focus-task" aria-label="Завершить задачу" ${task ? '' : 'disabled'}>${icon('check')}</button></div>
+        </section>
+        <div class="focus-stats"><div class="mini-stat"><b>${dayMinutes}</b><span>мин сегодня</span></div><div class="mini-stat"><b>${daySessions.length}</b><span>сессий</span></div><div class="mini-stat"><b>${weekMinutes}</b><span>мин за 7 дней</span></div></div>
+        <div class="section-head"><h2>Очередь фокуса</h2><span>${queue.length} задач</span></div><div class="focus-queue">${queue.length ? queue.map((item,index) => `<button class="queue-item ${item.id === task?.id ? 'active' : ''}" data-action="select-focus" data-id="${esc(item.id)}"><span class="queue-index">0${index+1}</span><span class="queue-copy"><b>${esc(item.title)}</b><span>${item.duration} мин · ${esc(item.project || item.category)}</span></span><span class="priority-${item.priority}">●</span></button>`).join('') : emptyHTML('Очередь пуста', 'Добавь задачу и вернись к фокусу.')}</div>
+      </section>`;
+    }
+
+    function streak() {
+      const days = new Set(data.tasks.filter(task => task.completedAt).map(task => dateOfTimestamp(task.completedAt)));
+      let count = 0;
+      let date = today();
+      if (!days.has(date)) date = addDays(date, -1);
+      while (days.has(date)) { count++; date = addDays(date, -1); }
+      return count;
+    }
+
+    function insightsView() {
+      const days = Array.from({length: 7}, (_, index) => addDays(today(), index - 6));
+      const counts = days.map(date => data.tasks.filter(task => task.completedAt && dateOfTimestamp(task.completedAt) === date).length);
+      const max = Math.max(1, ...counts);
+      const weekDone = counts.reduce((sum, count) => sum + count, 0);
+      const weekCreated = data.tasks.filter(task => task.date >= days[0] && task.date <= today()).length;
+      const rate = weekCreated ? Math.round(weekDone / weekCreated * 100) : 0;
+      const weekFocus = data.focusSessions.filter(session => session.date >= days[0]).reduce((sum, session) => sum + session.minutes, 0);
+      const categoryCounts = CATEGORIES.map(category => [category, data.tasks.filter(task => task.completedAt && task.category === category && dateOfTimestamp(task.completedAt) >= days[0]).length]).filter(([,count]) => count).sort((a,b) => b[1]-a[1]);
+      const categoryMax = Math.max(1, ...categoryCounts.map(([,count]) => count));
+      return `<section class="page">
+        <div class="page-head"><div class="eyebrow">Weekly review</div><h1>Твой прогресс.</h1><p class="subtitle">Не идеальность, а доказательства движения за последние 7 дней.</p></div>
+        <div class="insight-grid">
+          <div class="metric"><div class="metric-label">Завершено</div><div class="metric-value">${weekDone}<small> задач</small></div><div class="metric-note">${weekDone ? 'Каждая закрытая задача — возвращённое внимание.' : 'Первый результат появится после закрытой задачи.'}</div></div>
+          <div class="metric"><div class="metric-label">Серия</div><div class="metric-value">${streak()}<small> дней</small></div><div class="metric-note">Дни подряд хотя бы с одним выполненным делом.</div></div>
+          <div class="metric"><div class="metric-label">Фокус</div><div class="metric-value">${weekFocus}<small> мин</small></div><div class="metric-note">Чистое время из завершённых фокус-сессий.</div></div>
+          <div class="metric"><div class="metric-label">Выполнение</div><div class="metric-value">${Math.min(100, rate)}<small>%</small></div><div class="metric-note">Закрыто относительно задач текущей недели.</div></div>
+          <div class="metric wide"><div class="metric-label">Ритм недели</div><div class="week-chart">${days.map((date,index) => `<div class="day-bar ${date === today() ? 'today' : ''}"><i style="height:${Math.max(4, counts[index]/max*100)}%"></i><span>${new Intl.DateTimeFormat('ru-RU',{weekday:'short'}).format(new Date(`${date}T12:00:00`)).slice(0,2)}</span></div>`).join('')}</div></div>
+          <div class="metric wide"><div class="metric-label">Баланс сфер</div>${categoryCounts.length ? `<div class="category-list">${categoryCounts.map(([category,count]) => `<div class="category-row"><span>${esc(category)}</span><div class="category-track"><i style="width:${count/categoryMax*100}%"></i></div><b>${count}</b></div>`).join('')}</div>` : `<div class="metric-note" style="margin-top:20px">Заверши задачи, чтобы увидеть распределение по сферам.</div>`}</div>
+        </div>
+        <div class="privacy-card">${icon('lock')}<div><b>Данные принадлежат только тебе</b><span>Задачи и статистика остаются на этом устройстве. На сервер уходит только выбранный контекст AI-запроса.</span></div></div>
+      </section>`;
+    }
+
+    function render() {
+      document.querySelector('#app').innerHTML = ({ today: todayView, tasks: tasksView, focus: focusView, insights: insightsView })[view]();
+      document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active', button.dataset.view === view));
+      document.querySelector('#profile-button').textContent = initial();
+      clearInterval(timerInterval);
+      if (data.timer.running) timerInterval = setInterval(tickTimer, 1000);
+    }
+
+    function openModal(html) {
+      document.querySelector('#modal').innerHTML = `<div class="backdrop"><section class="sheet" role="dialog" aria-modal="true"><div class="handle"></div>${html}</section></div>`;
+      TG?.BackButton?.show();
+    }
+    function closeModal() { document.querySelector('#modal').innerHTML = ''; TG?.BackButton?.hide(); aiResult = null; }
+    TG?.BackButton?.onClick(closeModal);
+
+    function taskForm(task = {}) {
+      editingTaskId = task.id || null;
+      const value = {
+        title: '', notes: '', date: today(), time: '', duration: 30, category: 'Личное', project: '', priority: 'medium', energy: 'medium', recurrence: 'none', subtasks: [], ...task
+      };
+      const projects = [...new Set(data.tasks.map(item => item.project).filter(Boolean))];
+      openModal(`<div class="sheet-head"><h2>${editingTaskId ? 'Задача' : 'Новая задача'}</h2><button class="close-button" data-action="close-modal">${icon('x')}</button></div>
+        <form id="task-form">
+          <div class="field"><label for="task-title">Что нужно сделать</label><input class="input" id="task-title" maxlength="120" required autofocus value="${esc(value.title)}" placeholder="Конкретный результат"></div>
+          <div class="field"><label for="task-notes">Контекст</label><textarea class="input" id="task-notes" maxlength="700" placeholder="Ссылки, детали, критерий готовности">${esc(value.notes)}</textarea></div>
+          <div class="form-grid"><div class="field"><label for="task-date">Дата</label><input class="input" id="task-date" type="date" value="${esc(value.date)}"></div><div class="field"><label for="task-time">Время</label><input class="input" id="task-time" type="time" value="${esc(value.time)}"></div></div>
+          <div class="form-grid"><div class="field"><label for="task-duration">Длительность, мин</label><input class="input" id="task-duration" type="number" min="5" max="480" step="5" value="${Number(value.duration) || 30}"></div><div class="field"><label for="task-category">Сфера</label><select class="input" id="task-category">${CATEGORIES.map(category => `<option ${value.category === category ? 'selected' : ''}>${category}</option>`).join('')}</select></div></div>
+          <div class="form-grid"><div class="field"><label for="task-project">Проект</label><input class="input" id="task-project" list="projects" maxlength="50" value="${esc(value.project)}" placeholder="Без проекта"><datalist id="projects">${projects.map(project => `<option value="${esc(project)}">`).join('')}</datalist></div><div class="field"><label for="task-recurrence">Повтор</label><select class="input" id="task-recurrence">${Object.entries(RECURRENCES).map(([key,label]) => `<option value="${key}" ${value.recurrence === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div></div>
+          <div class="field"><label>Приоритет</label><div class="option-grid">${Object.entries(PRIORITIES).map(([key,label]) => `<button type="button" class="option ${value.priority === key ? 'active' : ''}" data-pick="priority" data-value="${key}">${label}</button>`).join('')}</div><input type="hidden" id="task-priority" value="${esc(value.priority)}"></div>
+          <div class="field"><label>Энергия</label><div class="option-grid">${Object.entries(ENERGY).map(([key,label]) => `<button type="button" class="option ${value.energy === key ? 'active' : ''}" data-pick="energy" data-value="${key}">${label}</button>`).join('')}</div><input type="hidden" id="task-energy" value="${esc(value.energy)}"></div>
+          ${editingTaskId ? `<div class="field"><label>Подзадачи</label><div class="subtask-list">${value.subtasks?.length ? value.subtasks.map(item => `<div class="subtask ${item.done ? 'done' : ''}"><button type="button" data-action="toggle-subtask" data-task="${esc(value.id)}" data-id="${esc(item.id)}"></button><span>${esc(item.title)}</span></div>`).join('') : '<span class="subtitle">AI может создать короткий маршрут выполнения.</span>'}</div><button type="button" class="secondary" data-action="ai-breakdown" data-id="${esc(value.id)}">${icon('wand')} Разбить задачу с AI</button></div>` : ''}
+          <div class="form-actions">${editingTaskId ? `<button type="button" class="icon-action" data-action="delete-task" data-id="${esc(value.id)}" aria-label="Удалить">${icon('trash')}</button>` : '<span></span>'}<button class="primary">${editingTaskId ? 'Сохранить изменения' : 'Добавить задачу'}</button></div>
+        </form>`);
+    }
+
+    function saveTask(form) {
+      const title = form.querySelector('#task-title').value.trim();
+      if (!title) return notify('Напиши название задачи');
+      const previous = data.tasks.find(task => task.id === editingTaskId);
+      const task = {
+        id: previous?.id || id(), title, notes: form.querySelector('#task-notes').value.trim(), date: form.querySelector('#task-date').value || today(),
+        time: form.querySelector('#task-time').value, duration: Math.min(480, Math.max(5, Number(form.querySelector('#task-duration').value) || 30)),
+        category: form.querySelector('#task-category').value, project: form.querySelector('#task-project').value.trim(), priority: form.querySelector('#task-priority').value,
+        energy: form.querySelector('#task-energy').value, recurrence: form.querySelector('#task-recurrence').value, done: previous?.done || false,
+        createdAt: previous?.createdAt || Date.now(), completedAt: previous?.completedAt || null, subtasks: previous?.subtasks || [], recurrenceSpawned: previous?.recurrenceSpawned || false
+      };
+      if (previous) data.tasks[data.tasks.indexOf(previous)] = task; else data.tasks.unshift(task);
+      save(); closeModal(); haptic('success'); notify(previous ? 'Задача обновлена' : 'Задача добавлена'); render();
+    }
+
+    function toggleTask(taskId, forceDone) {
+      const task = data.tasks.find(item => item.id === taskId);
+      if (!task) return;
+      task.done = forceDone ?? !task.done;
+      task.completedAt = task.done ? Date.now() : null;
+      if (task.done && task.recurrence !== 'none' && !task.recurrenceSpawned) {
+        task.recurrenceSpawned = true;
+        data.tasks.push({ ...task, id: id(), date: nextRecurringDate(task.date, task.recurrence), done: false, completedAt: null, recurrenceSpawned: false, subtasks: (task.subtasks || []).map(item => ({ ...item, done: false })) });
+      }
+      save(); haptic(task.done ? 'success' : 'selection'); render();
+    }
+
+    async function callAI(action, payload) {
+      if (!TG?.initData) throw new Error('AI доступен внутри Telegram Mini App');
+      const response = await fetch('/api/ai', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': TG.initData }, body: JSON.stringify({ action, payload })
+      });
+      if (!response.ok) throw new Error((await response.text()) || 'AI временно недоступен');
+      return (await response.json()).result;
+    }
+
+    function loadingModal(title, text) {
+      openModal(`<div class="sheet-head"><h2>${esc(title)}</h2><button class="close-button" data-action="close-modal">${icon('x')}</button></div><div class="loading"><div class="loader"></div>${esc(text)}</div>`);
+    }
+
+    async function createAIPlan() {
+      const tasks = pendingTasks().filter(task => !task.date || task.date <= addDays(today(), 2)).sort(taskSort).slice(0, 30);
+      if (!tasks.length) return notify('Сначала добавь задачи');
+      loadingModal('AI-план дня', 'DeepSeek собирает реалистичное расписание…');
+      try {
+        aiResult = await callAI('plan', { date: today(), now: new Date().toTimeString().slice(0,5), dayStart: data.settings.dayStart, dayEnd: data.settings.dayEnd, tasks: tasks.map(task => ({ taskId: task.id, title: task.title, date: task.date, time: task.time, duration: task.duration, priority: task.priority, energy: task.energy, category: task.category })) });
+        const schedule = Array.isArray(aiResult.schedule) ? aiResult.schedule : [];
+        openModal(`<div class="sheet-head"><h2>Твой маршрут</h2><button class="close-button" data-action="close-modal">${icon('x')}</button></div><div class="ai-result"><b>${esc(aiResult.summary || 'План готов')}</b><p>${esc(aiResult.advice || '')}</p><div class="plan-list">${schedule.map(item => { const task = data.tasks.find(task => task.id === item.taskId); return task ? `<div class="plan-row"><div class="plan-time">${esc(item.start || '')}</div><div><b>${esc(task.title)}</b><span>${esc(item.reason || '')}</span></div></div>` : ''; }).join('')}</div></div><button class="primary" style="margin-top:12px" data-action="apply-ai-plan">Применить время к задачам</button>`);
+      } catch (error) { closeModal(); notify(error.message); }
+    }
+
+    function applyAIPlan() {
+      for (const item of aiResult?.schedule || []) {
+        const task = data.tasks.find(task => task.id === item.taskId);
+        if (task && /^([01]\d|2[0-3]):[0-5]\d$/.test(item.start || '')) { task.time = item.start; task.date = today(); }
+      }
+      save(); closeModal(); haptic('success'); notify('AI-план применён'); render();
+    }
+
+    async function captureWithAI(text) {
+      text = text.trim();
+      if (!text) return notify('Напиши мысли или планы');
+      loadingModal('AI Inbox', 'Превращаю поток мыслей в понятные действия…');
+      try {
+        aiResult = await callAI('capture', { text, today: today(), currentTime: new Date().toTimeString().slice(0,5) });
+        const tasks = Array.isArray(aiResult.tasks) ? aiResult.tasks.slice(0, 12) : [];
+        openModal(`<div class="sheet-head"><h2>Разбор готов</h2><button class="close-button" data-action="close-modal">${icon('x')}</button></div><div class="ai-result"><b>${esc(aiResult.message || `Найдено задач: ${tasks.length}`)}</b><div class="plan-list">${tasks.map((task,index) => `<label class="plan-row"><input type="checkbox" data-capture-index="${index}" checked><div><b>${esc(task.title)}</b><span>${esc(task.date || today())} · ${Number(task.duration) || 30} мин · ${esc(PRIORITIES[task.priority] || PRIORITIES.medium)}</span></div></label>`).join('')}</div></div><button class="primary" style="margin-top:12px" data-action="import-ai-tasks">Добавить выбранные задачи</button>`);
+      } catch (error) { closeModal(); notify(error.message); }
+    }
+
+    function importAITasks() {
+      const selected = [...document.querySelectorAll('[data-capture-index]:checked')].map(input => aiResult.tasks[Number(input.dataset.captureIndex)]);
+      for (const task of selected) data.tasks.unshift({
+        id: id(), title: String(task.title || 'Новая задача').slice(0,120), notes: '', date: /^\d{4}-\d{2}-\d{2}$/.test(task.date || '') ? task.date : today(),
+        time: /^([01]\d|2[0-3]):[0-5]\d$/.test(task.time || '') ? task.time : '', duration: Math.min(480, Math.max(5, Number(task.duration) || 30)),
+        category: CATEGORIES.includes(task.category) ? task.category : 'Личное', project: '', priority: PRIORITIES[task.priority] ? task.priority : 'medium',
+        energy: ENERGY[task.energy] ? task.energy : 'medium', recurrence: 'none', done: false, createdAt: Date.now(), completedAt: null, subtasks: []
+      });
+      save(); closeModal(); haptic('success'); notify(`Добавлено задач: ${selected.length}`); render();
+    }
+
+    async function breakdownTask(taskId) {
+      const task = data.tasks.find(item => item.id === taskId);
+      if (!task) return;
+      loadingModal('AI-декомпозиция', 'Ищу самый короткий маршрут к результату…');
+      try {
+        aiResult = await callAI('breakdown', { title: task.title, notes: task.notes, duration: task.duration, category: task.category });
+        const subtasks = Array.isArray(aiResult.subtasks) ? aiResult.subtasks.slice(0, 8) : [];
+        openModal(`<div class="sheet-head"><h2>Маршрут задачи</h2><button class="close-button" data-action="close-modal">${icon('x')}</button></div><div class="ai-result"><b>${esc(aiResult.summary || task.title)}</b><p>Первый шаг: ${esc(aiResult.firstStep || subtasks[0]?.title || '')}</p><div class="plan-list">${subtasks.map((item,index) => `<div class="plan-row"><div class="plan-time">0${index+1}</div><div><b>${esc(item.title)}</b><span>${Number(item.duration) || 10} мин</span></div></div>`).join('')}</div></div><button class="primary" style="margin-top:12px" data-action="apply-breakdown" data-id="${esc(taskId)}">Добавить подзадачи</button>`);
+      } catch (error) { closeModal(); notify(error.message); }
+    }
+
+    function applyBreakdown(taskId) {
+      const task = data.tasks.find(item => item.id === taskId);
+      if (!task) return;
+      task.subtasks = (aiResult?.subtasks || []).slice(0,8).map(item => ({ id: id(), title: String(item.title || '').slice(0,120), duration: Number(item.duration) || 10, done: false })).filter(item => item.title);
+      save(); closeModal(); haptic('success'); notify('Подзадачи добавлены'); render();
+    }
+
+    function startPauseTimer() {
+      const task = selectedFocusTask();
+      if (!task) return notify('Добавь задачу для фокуса');
+      if (data.timer.running) { data.timer.remaining = timerRemaining(); data.timer.running = false; }
+      else { data.timer.taskId = task.id; data.timer.endsAt = Date.now() + timerRemaining() * 1000; data.timer.running = true; }
+      save(); haptic(); render();
+    }
+
+    function finishTimer() {
+      const minutes = data.timer.duration;
+      data.focusSessions.push({ id: id(), taskId: data.timer.taskId, date: today(), minutes, finishedAt: Date.now() });
+      data.timer = { ...data.timer, running: false, remaining: data.timer.duration * 60, endsAt: 0 };
+      save(); haptic('success'); notify(`Фокус-сессия ${minutes} мин завершена`); render();
+    }
+
+    function tickTimer() {
+      const remaining = timerRemaining();
+      const node = document.querySelector('#timer-value');
+      if (node) node.textContent = formatTimer(remaining);
+      if (remaining <= 0 && data.timer.running) finishTimer();
+    }
+
+    function settingsModal() {
+      const bytes = new Blob([JSON.stringify(data)]).size;
+      openModal(`<div class="sheet-head"><h2>Профиль и данные</h2><button class="close-button" data-action="close-modal">${icon('x')}</button></div>
+        <div class="settings-user"><div class="settings-avatar">${initial()}</div><div><b>${esc(USER ? `${USER.first_name || ''} ${USER.last_name || ''}`.trim() : 'Локальный профиль')}</b><span>Telegram ID: ${esc(USER_ID)} · ${(bytes/1024).toFixed(1)} КБ локально</span></div></div>
+        <div class="form-grid"><div class="field"><label for="day-start">Начало дня</label><input class="input" id="day-start" type="time" value="${esc(data.settings.dayStart)}"></div><div class="field"><label for="day-end">Конец дня</label><input class="input" id="day-end" type="time" value="${esc(data.settings.dayEnd)}"></div></div>
+        <button class="primary" data-action="save-settings">Сохранить часы дня</button>
+        <div class="section-head"><h2>Локальные данные</h2><span>без базы</span></div>
+        <div class="settings-list"><button class="settings-button" data-action="export-data">${icon('download')}<div><b>Экспортировать JSON</b><span>Резервная копия задач, фокуса и настроек.</span></div></button><button class="settings-button" data-action="import-data">${icon('upload')}<div><b>Импортировать JSON</b><span>Восстановить ранее сохранённую копию.</span></div></button><button class="settings-button danger" data-action="clear-data">${icon('trash')}<div><b>Удалить все данные</b><span>Это действие нельзя отменить без резервной копии.</span></div></button></div>`);
+    }
+
+    function exportData() {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = Object.assign(document.createElement('a'), { href: url, download: `dailyos-${USER_ID}-${today()}.json` });
+      link.click(); URL.revokeObjectURL(url); notify('Резервная копия создана');
+    }
+
+    async function importData(file) {
+      try {
+        const imported = JSON.parse(await file.text());
+        if (imported?.version !== 2 || !Array.isArray(imported.tasks) || !Array.isArray(imported.focusSessions)) throw new Error();
+        data = { ...blankData(), ...imported, settings: { ...blankData().settings, ...imported.settings } };
+        save(); closeModal(); render(); notify('Данные восстановлены');
+      } catch (_) { notify('Файл не похож на резервную копию DailyOS'); }
+    }
+
+    document.addEventListener('submit', event => {
+      event.preventDefault();
+      if (event.target.id === 'task-form') saveTask(event.target);
+      if (event.target.id === 'capture-form') captureWithAI(event.target.querySelector('input').value);
+    });
+
+    document.addEventListener('input', event => {
+      if (event.target.id === 'task-search') { search = event.target.value; render(); requestAnimationFrame(() => { const input = document.querySelector('#task-search'); input?.focus(); input?.setSelectionRange(search.length, search.length); }); }
+    });
+
+    document.addEventListener('click', event => {
+      const target = event.target.closest('button,[data-action],[data-view],[data-filter]');
+      if (!target) return;
+      if (target.dataset.view) { view = target.dataset.view; render(); window.scrollTo(0,0); haptic(); return; }
+      if (target.dataset.filter) { taskFilter = target.dataset.filter; render(); return; }
+      const action = target.dataset.action;
+      if (action === 'new-task') taskForm();
+      if (action === 'edit-task') taskForm(data.tasks.find(task => task.id === target.dataset.id));
+      if (action === 'close-modal') closeModal();
+      if (action === 'toggle-task') toggleTask(target.dataset.id);
+      if (action === 'delete-task' && confirm('Удалить задачу без возможности восстановления?')) { data.tasks = data.tasks.filter(task => task.id !== target.dataset.id); save(); closeModal(); render(); notify('Задача удалена'); }
+      if (action === 'settings') settingsModal();
+      if (action === 'ai-plan') createAIPlan();
+      if (action === 'apply-ai-plan') applyAIPlan();
+      if (action === 'import-ai-tasks') importAITasks();
+      if (action === 'ai-breakdown') breakdownTask(target.dataset.id);
+      if (action === 'apply-breakdown') applyBreakdown(target.dataset.id);
+      if (action === 'toggle-subtask') { const task = data.tasks.find(task => task.id === target.dataset.task); const subtask = task?.subtasks?.find(item => item.id === target.dataset.id); if (subtask) { subtask.done = !subtask.done; save(); taskForm(task); haptic(); } }
+      if (target.dataset.pick) { const input = document.querySelector(`#task-${target.dataset.pick}`); input.value = target.dataset.value; target.parentElement.querySelectorAll('.option').forEach(button => button.classList.toggle('active', button === target)); }
+      if (action === 'timer-toggle') startPauseTimer();
+      if (action === 'timer-reset') { data.timer.running = false; data.timer.remaining = data.timer.duration * 60; data.timer.endsAt = 0; save(); render(); }
+      if (action === 'timer-preset') { data.timer.duration = Number(target.dataset.minutes); data.timer.remaining = data.timer.duration * 60; save(); render(); }
+      if (action === 'select-focus') { data.timer.taskId = target.dataset.id; data.timer.running = false; data.timer.remaining = data.timer.duration * 60; save(); render(); }
+      if (action === 'complete-focus-task') { const task = selectedFocusTask(); if (task) toggleTask(task.id, true); }
+      if (action === 'save-settings') { data.settings.dayStart = document.querySelector('#day-start').value || '09:00'; data.settings.dayEnd = document.querySelector('#day-end').value || '20:00'; save(); closeModal(); notify('Часы дня сохранены'); }
+      if (action === 'export-data') exportData();
+      if (action === 'import-data') document.querySelector('#import-file').click();
+      if (action === 'clear-data' && confirm('Удалить все задачи, фокус-сессии и настройки на этом устройстве?')) { data = blankData(); save(); closeModal(); render(); notify('Локальные данные удалены'); }
+    });
+
+    document.querySelector('#import-file').addEventListener('change', event => { if (event.target.files[0]) importData(event.target.files[0]); event.target.value = ''; });
+    document.querySelector('#modal').addEventListener('click', event => { if (event.target.classList.contains('backdrop')) closeModal(); });
+
+    render();
+    const captured = new URLSearchParams(location.search).get('capture');
+    if (captured) { history.replaceState(null, '', location.pathname); setTimeout(() => captureWithAI(captured), 350); }
+  </script>
+</body>
+</html>
