@@ -160,17 +160,7 @@ def groq_vision_models() -> list[str]:
     return list(dict.fromkeys(model for model in (configured, "qwen/qwen3.6-27b") if model))
 
 
-def groq_error(text: str) -> str:
-    try:
-        data = json.loads(text)
-        text = data.get("error", {}).get("message") or data.get("message") or text
-    except json.JSONDecodeError:
-        pass
-    return " ".join(str(text).split())[:240]
-
-
 async def groq_transcribe_voice(data: bytes) -> str:
-    last_error = ""
     async with ClientSession(timeout=ClientTimeout(total=60)) as session:
         for model in groq_audio_models():
             form = FormData()
@@ -182,14 +172,12 @@ async def groq_transcribe_voice(data: bytes) -> str:
                     text = (await response.json()).get("text", "").strip()
                     if text:
                         return text
-                    raise RuntimeError("Groq не услышал речь в голосовом.")
-                last_error = f"{response.status}: {groq_error(await response.text())}"
-    raise RuntimeError(f"Groq не распознал голос. {last_error}")
+                    raise RuntimeError("DailyOS AI не услышал речь в голосовом.")
+    raise RuntimeError("DailyOS AI не распознал голос. Попробуй ещё раз.")
 
 
 async def groq_read_image(data: bytes, mime: str = "image/jpeg") -> str:
     image = base64.b64encode(data).decode()
-    last_error = ""
     async with ClientSession(timeout=ClientTimeout(total=60)) as session:
         for model in groq_vision_models():
             payload = {
@@ -207,13 +195,11 @@ async def groq_read_image(data: bytes, mime: str = "image/jpeg") -> str:
             async with session.post(AI_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, json=payload) as response:
                 if response.status == 200:
                     return (await response.json())["choices"][0]["message"]["content"].strip()
-                last_error = f"{response.status}: {groq_error(await response.text())}"
-    raise RuntimeError(f"Groq не прочитал скриншот. {last_error}")
+    raise RuntimeError("DailyOS AI не прочитал скриншот. Попробуй другое изображение.")
 
 
 async def groq_fridge_photo(data: bytes, mime: str = "image/jpeg"):
     image = base64.b64encode(data).decode()
-    last_error = ""
     async with ClientSession(timeout=ClientTimeout(total=60)) as session:
         for model in groq_vision_models():
             payload = {
@@ -235,11 +221,10 @@ async def groq_fridge_photo(data: bytes, mime: str = "image/jpeg"):
                         content = (await response.json())["choices"][0]["message"]["content"]
                         return parse_ai_json(content)
                     except json.JSONDecodeError as exc:
-                        raise RuntimeError("Groq вернул не JSON. Попробуй фото четче или продукты текстом.") from exc
+                        raise RuntimeError("DailyOS AI не разобрал фото. Попробуй фото четче или введи продукты текстом.") from exc
                     except (KeyError, TypeError) as exc:
-                        raise RuntimeError("Groq вернул некорректный ответ по фото.") from exc
-                last_error = f"{response.status}: {groq_error(await response.text())}"
-    raise RuntimeError(f"Groq не разобрал продукты. {last_error}")
+                        raise RuntimeError("DailyOS AI не смог обработать фото.") from exc
+    raise RuntimeError("DailyOS AI не разобрал продукты. Попробуй фото четче или введи их текстом.")
 
 
 @web.middleware
@@ -293,7 +278,7 @@ async def capture_message(message: types.Message):
 @dp.message(F.voice)
 async def capture_voice(message: types.Message):
     if not GROQ_API_KEY:
-        await message.answer("Голосовой разбор требует GROQ_API_KEY в Render.")
+        await message.answer("Голосовой разбор DailyOS AI временно недоступен.")
         return
     try:
         file = BytesIO()
@@ -308,7 +293,7 @@ async def capture_voice(message: types.Message):
 @dp.message(F.photo)
 async def capture_photo(message: types.Message):
     if not GROQ_API_KEY:
-        await message.answer("Разбор скриншотов требует GROQ_API_KEY в Render.")
+        await message.answer("Разбор скриншотов DailyOS AI временно недоступен.")
         return
     try:
         file = BytesIO()
@@ -325,7 +310,7 @@ async def index(_request: web.Request):
 
 
 async def health(_request: web.Request):
-    return web.json_response({"status": "ok", "ai": bool(GROQ_API_KEY), "provider": "groq"})
+    return web.json_response({"status": "ok", "ai": bool(GROQ_API_KEY), "provider": "dailyos"})
 
 
 async def options(_request: web.Request):
@@ -345,7 +330,7 @@ async def capture(request: web.Request):
 
 async def fridge_photo(request: web.Request):
     if not GROQ_API_KEY:
-        raise web.HTTPServiceUnavailable(text="GROQ_API_KEY не настроен")
+        raise web.HTTPServiceUnavailable(text="DailyOS AI не настроен")
     try:
         validate_init_data(request.headers.get("X-Telegram-Init-Data", ""))
         reader = await request.multipart()
@@ -365,7 +350,7 @@ async def fridge_photo(request: web.Request):
 
 async def ai(request: web.Request):
     if not GROQ_API_KEY:
-        raise web.HTTPServiceUnavailable(text="GROQ_API_KEY не настроен")
+        raise web.HTTPServiceUnavailable(text="DailyOS AI не настроен")
     try:
         user = validate_init_data(request.headers.get("X-Telegram-Init-Data", ""))
         body = await request.json()
@@ -400,16 +385,16 @@ async def ai(request: web.Request):
         ) as response:
             if response.status != 200:
                 if response.status == 401:
-                    raise web.HTTPBadGateway(text="Groq API key недействителен")
+                    raise web.HTTPBadGateway(text="DailyOS AI временно недоступен")
                 if response.status == 429:
-                    raise web.HTTPTooManyRequests(text="Бесплатный лимит Groq исчерпан. Попробуй позже.")
-                raise web.HTTPBadGateway(text=f"Groq временно недоступен ({response.status})")
+                    raise web.HTTPTooManyRequests(text="Лимит DailyOS AI исчерпан. Попробуй позже.")
+                raise web.HTTPBadGateway(text=f"DailyOS AI временно недоступен ({response.status})")
             result = parse_ai_json((await response.json())["choices"][0]["message"]["content"])
             return web.json_response({"result": result})
     except asyncio.TimeoutError as exc:
-        raise web.HTTPGatewayTimeout(text="Groq не ответил вовремя") from exc
+        raise web.HTTPGatewayTimeout(text="DailyOS AI не ответил вовремя") from exc
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
-        raise web.HTTPBadGateway(text="Groq вернул некорректный ответ") from exc
+        raise web.HTTPBadGateway(text="DailyOS AI вернул некорректный ответ") from exc
 
 
 async def startup(app: web.Application):
