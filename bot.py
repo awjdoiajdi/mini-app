@@ -32,6 +32,7 @@ WEBHOOK_PATH = "/telegram/webhook"
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()
 CAPTURE_TTL = 15 * 60
 CAPTURES: dict[str, tuple[float, int, str]] = {}
+http: ClientSession | None = None
 
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -161,70 +162,67 @@ def groq_vision_models() -> list[str]:
     return list(dict.fromkeys(model for model in (configured, "qwen/qwen3.6-27b") if model))
 
 
-async def groq_transcribe_voice(data: bytes) -> str:
-    async with ClientSession(timeout=ClientTimeout(total=60)) as session:
-        for model in groq_audio_models():
-            form = FormData()
-            form.add_field("model", model)
-            form.add_field("response_format", "json")
-            form.add_field("file", data, filename="voice.ogg", content_type="audio/ogg")
-            async with session.post(AUDIO_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, data=form) as response:
-                if response.status == 200:
-                    text = (await response.json()).get("text", "").strip()
-                    if text:
-                        return text
-                    raise RuntimeError("DailyOS AI не услышал речь в голосовом.")
+async def groq_transcribe_voice(session: ClientSession, data: bytes) -> str:
+    for model in groq_audio_models():
+        form = FormData()
+        form.add_field("model", model)
+        form.add_field("response_format", "json")
+        form.add_field("file", data, filename="voice.ogg", content_type="audio/ogg")
+        async with session.post(AUDIO_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, data=form) as response:
+            if response.status == 200:
+                text = (await response.json()).get("text", "").strip()
+                if text:
+                    return text
+                raise RuntimeError("DailyOS AI не услышал речь в голосовом.")
     raise RuntimeError("DailyOS AI не распознал голос. Попробуй ещё раз.")
 
 
-async def groq_read_image(data: bytes, mime: str = "image/jpeg") -> str:
+async def groq_read_image(session: ClientSession, data: bytes, mime: str = "image/jpeg") -> str:
     image = base64.b64encode(data).decode()
-    async with ClientSession(timeout=ClientTimeout(total=60)) as session:
-        for model in groq_vision_models():
-            payload = {
-                "model": model,
-                "temperature": 0.1,
-                "max_completion_tokens": 900,
-                "messages": [
-                    {"role": "system", "content": "Извлеки из скриншота или фото только реальные задачи, даты, время и важный контекст. Отвечай кратким русским текстом."},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": "Найди задачи на изображении. Если задач нет, скажи это."},
-                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image}"}},
-                    ]},
-                ],
-            }
-            async with session.post(AI_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, json=payload) as response:
-                if response.status == 200:
-                    return (await response.json())["choices"][0]["message"]["content"].strip()
+    for model in groq_vision_models():
+        payload = {
+            "model": model,
+            "temperature": 0.1,
+            "max_completion_tokens": 900,
+            "messages": [
+                {"role": "system", "content": "Извлеки из скриншота или фото только реальные задачи, даты, время и важный контекст. Отвечай кратким русским текстом."},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "Найди задачи на изображении. Если задач нет, скажи это."},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image}"}},
+                ]},
+            ],
+        }
+        async with session.post(AI_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, json=payload) as response:
+            if response.status == 200:
+                return (await response.json())["choices"][0]["message"]["content"].strip()
     raise RuntimeError("DailyOS AI не прочитал скриншот. Попробуй другое изображение.")
 
 
-async def groq_fridge_photo(data: bytes, mime: str = "image/jpeg"):
+async def groq_fridge_photo(session: ClientSession, data: bytes, mime: str = "image/jpeg"):
     image = base64.b64encode(data).decode()
-    async with ClientSession(timeout=ClientTimeout(total=60)) as session:
-        for model in groq_vision_models():
-            payload = {
-                "model": model,
-                "temperature": 0.2,
-                "max_completion_tokens": 1400,
-                "response_format": {"type": "json_object"},
-                "messages": [
-                    {"role": "system", "content": ai_messages("recipe", {})[0]["content"]},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": "Определи продукты на фото и предложи блюда."},
-                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image}"}},
-                    ]},
-                ],
-            }
-            async with session.post(AI_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, json=payload) as response:
-                if response.status == 200:
-                    try:
-                        content = (await response.json())["choices"][0]["message"]["content"]
-                        return parse_ai_json(content)
-                    except json.JSONDecodeError as exc:
-                        raise RuntimeError("DailyOS AI не разобрал фото. Попробуй фото четче или введи продукты текстом.") from exc
-                    except (KeyError, TypeError) as exc:
-                        raise RuntimeError("DailyOS AI не смог обработать фото.") from exc
+    for model in groq_vision_models():
+        payload = {
+            "model": model,
+            "temperature": 0.2,
+            "max_completion_tokens": 1400,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": ai_messages("recipe", {})[0]["content"]},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "Определи продукты на фото и предложи блюда."},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image}"}},
+                ]},
+            ],
+        }
+        async with session.post(AI_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, json=payload) as response:
+            if response.status == 200:
+                try:
+                    content = (await response.json())["choices"][0]["message"]["content"]
+                    return parse_ai_json(content)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError("DailyOS AI не разобрал фото. Попробуй фото четче или введи продукты текстом.") from exc
+                except (KeyError, TypeError) as exc:
+                    raise RuntimeError("DailyOS AI не смог обработать фото.") from exc
     raise RuntimeError("DailyOS AI не разобрал продукты. Попробуй фото четче или введи их текстом.")
 
 
@@ -284,7 +282,7 @@ async def capture_voice(message: types.Message):
     try:
         file = BytesIO()
         await bot.download(message.voice.file_id, destination=file)
-        text = await groq_transcribe_voice(file.getvalue())
+        text = await groq_transcribe_voice(http, file.getvalue())
     except Exception as exc:
         await message.answer(str(exc))
         return
@@ -299,7 +297,7 @@ async def capture_photo(message: types.Message):
     try:
         file = BytesIO()
         await bot.download(message.photo[-1].file_id, destination=file)
-        text = await groq_read_image(file.getvalue(), "image/jpeg")
+        text = await groq_read_image(http, file.getvalue(), "image/jpeg")
     except Exception as exc:
         await message.answer(str(exc))
         return
@@ -341,7 +339,7 @@ async def fridge_photo(request: web.Request):
         data = await field.read(decode=False)
         if len(data) > 5_000_000:
             raise ValueError("Фото больше 5 МБ")
-        result = await groq_fridge_photo(data, field.headers.get("Content-Type", "image/jpeg").split(";", 1)[0])
+        result = await groq_fridge_photo(request.app["http"], data, field.headers.get("Content-Type", "image/jpeg").split(";", 1)[0])
     except (ValueError, json.JSONDecodeError) as exc:
         raise web.HTTPBadRequest(text=str(exc)) from exc
     except RuntimeError as exc:
@@ -400,7 +398,8 @@ async def ai(request: web.Request):
 
 
 async def startup(app: web.Application):
-    app["http"] = ClientSession(timeout=ClientTimeout(total=35))
+    global http
+    http = app["http"] = ClientSession(timeout=ClientTimeout(total=60))
     await bot.set_webhook(
         f"{APP_URL.rstrip('/')}{WEBHOOK_PATH}",
         secret_token=WEBHOOK_SECRET,
