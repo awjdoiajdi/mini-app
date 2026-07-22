@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 
 os.environ.setdefault("BOT_TOKEN", "123456:test-token-for-local-check")
 
-from bot import validate_init_data
+from bot import parse_ai_json, validate_init_data
 
 
 def signed_data(token, now=1_700_000_000):
@@ -26,4 +26,5 @@ if __name__ == "__main__":
         raise AssertionError("tampered data was accepted")
     except ValueError:
         pass
+    assert parse_ai_json('```json\n{"ok": true}\n```')["ok"] is True
     print("Telegram initData validation: OK")

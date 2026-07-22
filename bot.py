@@ -56,6 +56,11 @@ def validate_init_data(init_data: str, token: str = BOT_TOKEN, max_age: int = 86
 
 def ai_messages(action: str, payload: dict) -> list[dict[str, str]]:
     prompts = {
+        "brief": (
+            "Сделай утренний или текущий briefing по данным пользователя. Верни JSON: "
+            "{\"headline\":\"...\",\"risk\":\"...\",\"nextMove\":\"...\",\"praise\":\"...\","
+            "\"tips\":[\"...\",\"...\"]}. Без воды, как личный оператор."
+        ),
         "plan": (
             "Составь реалистичный план дня. Учитывай время, приоритет, энергию и длительность. "
             "Не меняй taskId. Верни JSON: {\"summary\":\"...\",\"schedule\":[{\"taskId\":\"...\","
@@ -85,14 +90,24 @@ def ai_messages(action: str, payload: dict) -> list[dict[str, str]]:
     ]
 
 
+def parse_ai_json(content: str):
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        start, end = content.find("{"), content.rfind("}")
+        if start == -1 or end == -1 or start >= end:
+            raise
+        return json.loads(content[start:end + 1])
+
+
 @dp.message(CommandStart())
 async def start(message: types.Message):
     keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="Открыть DailyOS", web_app=WebAppInfo(url=APP_URL))
+    keyboard.button(text="Открыть Command Center", web_app=WebAppInfo(url=APP_URL))
     name = html.escape(message.from_user.first_name) if message.from_user else "друг"
     await message.answer(
-        f"<b>DailyOS</b>\n\nПривет, {name}! Это твой AI-оператор дня: задачи, умный план, "
-        "фокус и честная аналитика без перегруза.\n\nОтправь мне мысль обычным сообщением или открой приложение.",
+        f"<b>DailyOS Command Center</b>\n\nПривет, {name}! Это личный оператор дня: миссии, привычки, "
+        "AI-разбор мыслей, фокус-сессии и честный отчёт по прогрессу.\n\nОтправь мысль обычным сообщением или открой центр управления.",
         reply_markup=keyboard.as_markup(),
     )
 
@@ -105,7 +120,7 @@ async def capture_message(message: types.Message):
     url = f"{APP_URL}{separator}capture={quote(text)}" if can_transfer else APP_URL
     keyboard = InlineKeyboardBuilder()
     keyboard.button(
-        text="Разобрать в DailyOS",
+        text="Разобрать в Command Center",
         web_app=WebAppInfo(url=url),
     )
     await message.answer(
@@ -155,7 +170,6 @@ async def ai(request: web.Request):
             json={
                 "model": os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b"),
                 "messages": messages,
-                "response_format": {"type": "json_object"},
                 "temperature": 0.25,
                 "max_tokens": 1400,
             },
@@ -166,7 +180,7 @@ async def ai(request: web.Request):
                 if response.status == 429:
                     raise web.HTTPTooManyRequests(text="Бесплатный лимит Groq исчерпан. Попробуй позже.")
                 raise web.HTTPBadGateway(text=f"Groq временно недоступен ({response.status})")
-            result = json.loads((await response.json())["choices"][0]["message"]["content"])
+            result = parse_ai_json((await response.json())["choices"][0]["message"]["content"])
             return web.json_response({"result": result})
     except asyncio.TimeoutError as exc:
         raise web.HTTPGatewayTimeout(text="Groq не ответил вовремя") from exc
