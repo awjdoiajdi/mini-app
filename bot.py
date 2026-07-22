@@ -19,11 +19,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 APP_URL = os.environ.get("APP_URL") or os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10000")
 PORT = int(os.environ.get("PORT", "10000"))
 FRONTEND = Path(__file__).parent / "frontend" / "index.html"
-DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
+AI_URL = "https://api.groq.com/openai/v1/chat/completions"
 WEBHOOK_PATH = "/telegram/webhook"
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()
 
@@ -121,12 +121,12 @@ async def index(_request: web.Request):
 
 
 async def health(_request: web.Request):
-    return web.json_response({"status": "ok", "ai": bool(DEEPSEEK_API_KEY)})
+    return web.json_response({"status": "ok", "ai": bool(GROQ_API_KEY), "provider": "groq"})
 
 
 async def ai(request: web.Request):
-    if not DEEPSEEK_API_KEY:
-        raise web.HTTPServiceUnavailable(text="DEEPSEEK_API_KEY не настроен")
+    if not GROQ_API_KEY:
+        raise web.HTTPServiceUnavailable(text="GROQ_API_KEY не настроен")
     try:
         user = validate_init_data(request.headers.get("X-Telegram-Init-Data", ""))
         body = await request.json()
@@ -150,10 +150,10 @@ async def ai(request: web.Request):
 
     try:
         async with request.app["http"].post(
-            DEEPSEEK_URL,
-            headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
+            AI_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
             json={
-                "model": os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"),
+                "model": os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b"),
                 "messages": messages,
                 "response_format": {"type": "json_object"},
                 "temperature": 0.25,
@@ -161,13 +161,17 @@ async def ai(request: web.Request):
             },
         ) as response:
             if response.status != 200:
-                raise web.HTTPBadGateway(text=f"DeepSeek временно недоступен ({response.status})")
+                if response.status == 401:
+                    raise web.HTTPBadGateway(text="Groq API key недействителен")
+                if response.status == 429:
+                    raise web.HTTPTooManyRequests(text="Бесплатный лимит Groq исчерпан. Попробуй позже.")
+                raise web.HTTPBadGateway(text=f"Groq временно недоступен ({response.status})")
             result = json.loads((await response.json())["choices"][0]["message"]["content"])
             return web.json_response({"result": result})
     except asyncio.TimeoutError as exc:
-        raise web.HTTPGatewayTimeout(text="DeepSeek не ответил вовремя") from exc
+        raise web.HTTPGatewayTimeout(text="Groq не ответил вовремя") from exc
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
-        raise web.HTTPBadGateway(text="DeepSeek вернул некорректный ответ") from exc
+        raise web.HTTPBadGateway(text="Groq вернул некорректный ответ") from exc
 
 
 async def startup(app: web.Application):

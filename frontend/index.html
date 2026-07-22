@@ -568,7 +568,7 @@
           <div class="score-card"><div class="score-label">Day score</div><div class="score-number">${score}<small>/100</small></div><div class="score-dots">${[20,40,60,80,100].map(level => `<i class="${score >= level ? 'on' : ''}"></i>`).join('')}</div><div class="score-note">${score >= 80 ? 'Сильный темп' : score >= 50 ? 'Хороший ритм' : 'Начни с одного шага'}</div></div>
         </div>
         <form class="capture" id="capture-form"><div class="capture-icon">${icon('spark')}</div><input id="capture-input" maxlength="700" autocomplete="off" placeholder="Сбрось мысли — AI разложит по задачам"><button aria-label="Разобрать с AI">${icon('arrow')}</button></form>
-        <div class="section-head"><h2>AI-оператор</h2><span>DeepSeek</span></div>
+        <div class="section-head"><h2>AI-оператор</h2><span>Groq · GPT-OSS</span></div>
         <section class="ai-card"><div class="ai-orb">${icon('wand')}</div><div class="ai-copy"><b>Собрать оптимальный план</b><span>Приоритеты, энергия, длительность и реальные часы дня.</span></div><button data-action="ai-plan">План дня</button></section>
         ${overdue.length ? `<div class="section-head"><h2>Требует внимания</h2><span>${overdue.length}</span></div><div class="timeline">${overdue.slice(0,3).map(taskHTML).join('')}</div>` : ''}
         <div class="section-head"><h2>Сегодня</h2><button class="link-button" data-view="tasks">Все задачи</button></div>
@@ -729,7 +729,7 @@
     async function createAIPlan() {
       const tasks = pendingTasks().filter(task => !task.date || task.date <= addDays(today(), 2)).sort(taskSort).slice(0, 30);
       if (!tasks.length) return notify('Сначала добавь задачи');
-      loadingModal('AI-план дня', 'DeepSeek собирает реалистичное расписание…');
+      loadingModal('AI-план дня', 'Groq собирает реалистичное расписание…');
       try {
         aiResult = await callAI('plan', { date: today(), now: new Date().toTimeString().slice(0,5), dayStart: data.settings.dayStart, dayEnd: data.settings.dayEnd, tasks: tasks.map(task => ({ taskId: task.id, title: task.title, date: task.date, time: task.time, duration: task.duration, priority: task.priority, energy: task.energy, category: task.category })) });
         const schedule = Array.isArray(aiResult.schedule) ? aiResult.schedule : [];
