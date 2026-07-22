@@ -135,17 +135,36 @@ def capture_url(text: str, user_id: int) -> str:
     return f"{APP_URL}{separator}capture_id={remember_capture(text, user_id)}"
 
 
+def groq_audio_models() -> list[str]:
+    configured = os.environ.get("GROQ_AUDIO_MODEL", "whisper-large-v3-turbo").strip()
+    return list(dict.fromkeys(model for model in (configured, "whisper-large-v3-turbo", "whisper-large-v3") if model))
+
+
+def groq_error(text: str) -> str:
+    try:
+        data = json.loads(text)
+        text = data.get("error", {}).get("message") or data.get("message") or text
+    except json.JSONDecodeError:
+        pass
+    return " ".join(str(text).split())[:240]
+
+
 async def groq_transcribe_voice(data: bytes) -> str:
-    form = FormData()
-    form.add_field("model", os.environ.get("GROQ_AUDIO_MODEL", "whisper-large-v3-turbo"))
-    form.add_field("language", "ru")
-    form.add_field("response_format", "json")
-    form.add_field("file", data, filename="voice.oga", content_type="audio/ogg")
+    last_error = ""
     async with ClientSession(timeout=ClientTimeout(total=60)) as session:
-        async with session.post(AUDIO_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, data=form) as response:
-            if response.status != 200:
-                raise RuntimeError(f"Groq не распознал голос ({response.status})")
-            return (await response.json()).get("text", "").strip()
+        for model in groq_audio_models():
+            form = FormData()
+            form.add_field("model", model)
+            form.add_field("response_format", "json")
+            form.add_field("file", data, filename="voice.ogg", content_type="audio/ogg")
+            async with session.post(AUDIO_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, data=form) as response:
+                if response.status == 200:
+                    text = (await response.json()).get("text", "").strip()
+                    if text:
+                        return text
+                    raise RuntimeError("Groq не услышал речь в голосовом.")
+                last_error = f"{response.status}: {groq_error(await response.text())}"
+    raise RuntimeError(f"Groq не распознал голос. {last_error}")
 
 
 async def groq_read_image(data: bytes) -> str:
