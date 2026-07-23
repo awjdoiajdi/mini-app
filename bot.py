@@ -10,7 +10,7 @@ import time
 from collections import defaultdict, deque
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, urlencode
 
 from aiohttp import ClientSession, ClientTimeout, FormData, web
 from aiogram import Bot, Dispatcher, F, types
@@ -26,6 +26,7 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 APP_URL = os.environ.get("APP_URL") or os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10000")
 PORT = int(os.environ.get("PORT", "10000"))
 FRONTEND = Path(__file__).parent / "frontend" / "index.html"
+APP_VERSION = str(FRONTEND.stat().st_mtime_ns)
 AI_URL = "https://api.groq.com/openai/v1/chat/completions"
 AUDIO_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 WEBHOOK_PATH = "/telegram/webhook"
@@ -159,9 +160,13 @@ def pop_capture(capture_id: str, user_id: int, now: float | None = None) -> str 
     return item[2]
 
 
-def capture_url(text: str, user_id: int) -> str:
+def app_url(**params: str) -> str:
     separator = "&" if "?" in APP_URL else "?"
-    return f"{APP_URL}{separator}capture_id={remember_capture(text, user_id)}"
+    return f"{APP_URL}{separator}{urlencode({'v': APP_VERSION, **params})}"
+
+
+def capture_url(text: str, user_id: int) -> str:
+    return app_url(capture_id=remember_capture(text, user_id))
 
 
 def groq_audio_models() -> list[str]:
@@ -268,7 +273,7 @@ async def answer_capture(message: types.Message, text: str, title: str):
 @dp.message(CommandStart())
 async def start(message: types.Message):
     keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="Открыть DailyOS", web_app=WebAppInfo(url=APP_URL))
+    keyboard.button(text="Открыть DailyOS", web_app=WebAppInfo(url=app_url()))
     name = html.escape(message.from_user.first_name) if message.from_user else "друг"
     await message.answer(
         f"<b>DailyOS</b>\n\nПривет, {name}! Отправь сюда текст, пересланное сообщение, голос или скриншот. "
@@ -412,6 +417,7 @@ async def ai(request: web.Request):
 async def startup(app: web.Application):
     global http
     http = app["http"] = ClientSession(timeout=ClientTimeout(total=60))
+    await bot.set_chat_menu_button(menu_button=types.MenuButtonWebApp(text="Открыть DailyOS", web_app=WebAppInfo(url=app_url())))
     await bot.set_webhook(
         f"{APP_URL.rstrip('/')}{WEBHOOK_PATH}",
         secret_token=WEBHOOK_SECRET,
