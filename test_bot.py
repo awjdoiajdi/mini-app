@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 
 os.environ.setdefault("BOT_TOKEN", "123456:test-token-for-local-check")
 
-from bot import pop_capture, parse_ai_json, remember_capture, validate_init_data
+from bot import ai_messages, pop_capture, parse_ai_json, remember_capture, validate_init_data
 
 
 def signed_data(token, now=1_700_000_000):
@@ -27,6 +27,8 @@ if __name__ == "__main__":
     except ValueError:
         pass
     assert parse_ai_json('```json\n{"ok": true}\n```')["ok"] is True
+    safety = ai_messages("chat", {})[0]["content"]
+    assert "jailbreak" in safety and "Я DailyOS" in safety
     capture_id = remember_capture("secret task", 42, now=10)
     assert pop_capture(capture_id, 7, now=11) is None
     assert pop_capture(capture_id, 42, now=11) == "secret task"
