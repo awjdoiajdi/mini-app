@@ -3,9 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-  <meta name="theme-color" content="#f6f6f4" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0d0d0f" media="(prefers-color-scheme: dark)">
-  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f6f6f4">
+  <meta name="color-scheme" content="light">
   <title>DailyOS</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -31,6 +30,7 @@
     .onboarding{position:fixed;inset:0;z-index:120;display:grid;place-items:center;background:var(--bg);padding:40px 28px;text-align:center}.onboarding .logo{width:64px;height:64px;margin-bottom:24px;border-radius:18px;background:var(--ink);color:var(--on-ink);display:grid;place-items:center;font-size:28px;font-weight:700;letter-spacing:-.04em}.onboarding h1{font-size:28px;letter-spacing:-.035em;font-weight:700;margin-bottom:10px;line-height:1.1}.onboarding p{font-size:14px;color:var(--muted);line-height:1.5;margin-bottom:32px;max-width:280px}.onboarding .primary{min-height:46px;width:100%;font-size:15px;border-radius:14px}
     .recipe-card{margin-top:12px;padding:12px;border-radius:14px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1)}.recipe-card-top{display:flex;align-items:center;gap:10px;margin-bottom:6px}.recipe-card-icon{width:36px;height:36px;border-radius:10px;background:rgba(255,255,255,.12);display:grid;place-items:center;flex:0 0 auto}.recipe-card-icon svg{width:20px;height:20px;stroke:#fff;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.recipe-card h3{font-size:14px;font-weight:600;letter-spacing:-.01em;color:#fff;flex:1}.recipe-card-pills{display:flex;flex-wrap:wrap;gap:5px}.recipe-card-pills span{font-size:10px;font-weight:600;padding:2px 7px;border-radius:6px;background:rgba(255,255,255,.12);color:rgba(255,255,255,.8)}.recipe-card p{font-size:11px;color:rgba(255,255,255,.6);line-height:1.4;margin-top:6px}.msg.assistant .recipe-card{background:var(--panel-2);border-color:var(--line)}.msg.assistant .recipe-card h3{color:var(--ink)}.msg.assistant .recipe-card-icon{background:var(--line-soft)}.msg.assistant .recipe-card-icon svg{stroke:var(--ink)}.msg.assistant .recipe-card-pills span{background:var(--line-soft);color:var(--muted)}.msg.assistant .recipe-card p{color:var(--muted)}
     .quick-actions-sheet{display:grid;gap:2px;padding:4px 0}.quick-actions-sheet button{display:flex;align-items:center;gap:12px;width:100%;padding:14px 4px;text-align:left;font-size:15px;font-weight:500;border-bottom:1px solid var(--line-soft);min-height:48px}.quick-actions-sheet button:last-child{border:0}.quick-actions-sheet svg{width:18px;height:18px;stroke:var(--soft);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}.quick-actions-sheet .danger-text{color:var(--bad)}.quick-actions-sheet .danger-text svg{stroke:var(--bad)}
+    @media (prefers-color-scheme:dark){:root{--bg:#f6f6f4;--ink:#0e0e0e;--muted:#6b6b6b;--soft:#9a9a9a;--line:#e6e6e3;--line-soft:#efeee8;--panel:#fff;--panel-2:#fbfbf9;--bad:#c43d3d;--good:#3da568;--accent:#3a6ee8;--shadow:0 10px 34px rgba(0,0,0,.05);--on-ink:#fff}.msg{background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.03)}.nav{background:rgba(255,255,255,.92);border-top-color:var(--line-soft)}.sheet{background:#fff}.composer form,.quick-row,.settings-list,.camera,.msg-actions button{background:#fff}.composer form,.quick-row,.settings-list{border-color:var(--line)}}
   </style>
 </head>
 <body>
@@ -45,8 +45,7 @@
   <div id="modal-root"></div><div id="toast" class="toast" role="status"></div><input id="import-file" class="hidden" type="file" accept="application/json"><input id="food-photo" class="hidden" type="file" accept="image/*" capture="environment">
   <script>
     const TG=window.Telegram?.WebApp;TG?.ready();TG?.expand();
-    const isDark=matchMedia('(prefers-color-scheme:dark)').matches;
-    TG?.setHeaderColor?.(isDark?'#0d0d0f':'#f6f6f4');TG?.setBackgroundColor?.(isDark?'#0d0d0f':'#f6f6f4');
+    TG?.setHeaderColor?.('#f6f6f4');TG?.setBackgroundColor?.('#f6f6f4');
     const USER=TG?.initDataUnsafe?.user,USER_ID=String(USER?.id||'guest'),KEY=`dailyos.ai.v5.${USER_ID}`,OLD4=`dailyos.black.v4.${USER_ID}`,OLDCHAT=`dailyos.chat.v1.${USER_ID}`,ONBOARDED_KEY=`dailyos.onboarded.${USER_ID}`;
     const API_BASE=/^(dailyos\.onrender\.com|localhost|127\.0\.0\.1)$/.test(location.hostname)?'':'https://dailyos.onrender.com';
     const PR={high:'Высокий',medium:'Средний',low:'Низкий'},CATS=['Работа','Личное','Здоровье','Учёба','Дом','Покупки','Еда','Другое'];
