@@ -317,7 +317,7 @@ async def capture_photo(message: types.Message):
 
 
 async def index(_request: web.Request):
-    return web.FileResponse(FRONTEND)
+    return web.FileResponse(FRONTEND, headers={"Cache-Control": "no-store, max-age=0"})
 
 
 async def health(_request: web.Request):
