@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import html
 import json
+import math
 import os
 import secrets
 import time
@@ -12,7 +13,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode
 
-from aiohttp import ClientSession, ClientTimeout, FormData, web
+from aiohttp import ClientError, ClientSession, ClientTimeout, FormData, web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -23,12 +24,14 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+TOMTOM_API_KEY = os.environ.get("TOMTOM_API_KEY", "")
 APP_URL = os.environ.get("APP_URL") or os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10000")
 PORT = int(os.environ.get("PORT", "10000"))
 FRONTEND = Path(__file__).parent / "frontend" / "index.html"
 APP_VERSION = str(FRONTEND.stat().st_mtime_ns)
 AI_URL = "https://api.groq.com/openai/v1/chat/completions"
 AUDIO_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+PLACES_URL = "https://api.tomtom.com/maps/orbis/places/discover"
 WEBHOOK_PATH = "/telegram/webhook"
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()
 CAPTURE_TTL = 15 * 60
@@ -102,6 +105,7 @@ def ai_messages(action: str, payload: dict) -> list[dict[str, str]]:
             "Если режим rescue, предложи plan с taskId и date/time/delete/done только для переданных задач. "
             "Если речь про еду или рецепт, recipe обязан содержать title, time, difficulty, ingredients и steps; "
             "не пиши 'вот рецепт' без заполненного recipe. "
+            "Не выдумывай названия или адреса реальных организаций; для поиска мест рядом попроси написать запрос со словом 'рядом'. "
             "Верни JSON: {\"reply\":\"...\",\"tasks\":[{\"title\":\"...\",\"date\":\"YYYY-MM-DD\","
             "\"time\":\"HH:MM\",\"duration\":30,\"priority\":\"medium\",\"energy\":\"medium\","
             "\"category\":\"Личное\"}],\"recipe\":null,\"plan\":[]}. priority и energy: low, medium или high. Без воды."
@@ -134,6 +138,53 @@ def parse_ai_json(content: str):
         if start == -1 or end == -1 or start >= end:
             raise
         return json.loads(content[start:end + 1])
+
+
+def places_request(query: str, latitude: float, longitude: float) -> dict:
+    point = {"type": "point", "coordinates": [longitude, latitude]}
+    return {
+        "query": query,
+        "origin": point,
+        "preferences": {"geometry": point},
+        "maxResults": 3,
+        "filters": {
+            "types": ["poi"],
+            "geometry": {"type": "circle", "center": [longitude, latitude], "radiusInMeters": 5000},
+        },
+    }
+
+
+def normalize_places(payload: dict) -> list[dict]:
+    places = []
+    results = payload.get("results") if isinstance(payload, dict) else []
+    for item in results if isinstance(results, list) else []:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()[:120]
+        if not title:
+            continue
+        poi_types = item.get("poiTypes") if isinstance(item.get("poiTypes"), list) else []
+        category = str(poi_types[0].get("name") or "Место").strip()[:80] if poi_types and isinstance(poi_types[0], dict) else "Место"
+        address = item.get("address") or ""
+        if isinstance(address, dict):
+            address = ", ".join(filter(None, [
+                " ".join(filter(None, [str(address.get("street") or "").strip(), str(address.get("houseNumber") or "").strip()])),
+                str(address.get("municipality") or "").strip(),
+                str(address.get("country") or "").strip(),
+            ]))
+        if not address and isinstance(item.get("subtitles"), list):
+            address = ", ".join(str(value) for value in item["subtitles"][:2])
+        distance = item.get("distanceInMeters")
+        places.append({
+            "id": str(item.get("id") or "")[:160],
+            "title": title,
+            "category": category,
+            "address": str(address).strip()[:200],
+            "distance": max(0, round(distance)) if type(distance) in (int, float) and math.isfinite(distance) else None,
+        })
+        if len(places) == 3:
+            break
+    return places
 
 
 def cleanup_captures(now: float | None = None):
@@ -326,7 +377,7 @@ async def index(_request: web.Request):
 
 
 async def health(_request: web.Request):
-    return web.json_response({"status": "ok", "ai": bool(GROQ_API_KEY), "provider": "dailyos"})
+    return web.json_response({"status": "ok", "ai": bool(GROQ_API_KEY), "places": bool(TOMTOM_API_KEY), "provider": "dailyos"})
 
 
 async def options(_request: web.Request):
@@ -414,6 +465,69 @@ async def ai(request: web.Request):
         raise web.HTTPBadGateway(text="DailyOS AI вернул некорректный ответ") from exc
 
 
+async def places(request: web.Request):
+    if not TOMTOM_API_KEY:
+        raise web.HTTPServiceUnavailable(text="Поиск мест пока не настроен")
+    try:
+        user = validate_init_data(request.headers.get("X-Telegram-Init-Data", ""))
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+
+    # ponytail: in-memory quota protection is enough until the service runs on multiple instances.
+    calls = request.app["place_rate_limits"][user["id"]]
+    minute_ago = time.monotonic() - 60
+    while calls and calls[0] < minute_ago:
+        calls.popleft()
+    if len(calls) >= 10:
+        raise web.HTTPTooManyRequests(text="Лимит поиска мест: 10 запросов в минуту")
+    calls.append(time.monotonic())
+
+    try:
+        if request.content_length and request.content_length > 2048:
+            raise ValueError("Слишком много данных для поиска")
+        raw = bytearray()
+        async for chunk in request.content.iter_chunked(2049):
+            raw.extend(chunk)
+            if len(raw) > 2048:
+                raise ValueError("Слишком много данных для поиска")
+        body = json.loads(raw)
+        if not isinstance(body, dict):
+            raise ValueError("Некорректный запрос")
+        query = body.get("query", "").strip() if isinstance(body.get("query"), str) else ""
+        latitude, longitude = body.get("latitude"), body.get("longitude")
+        if not 2 <= len(query) <= 120:
+            raise ValueError("Уточни, какое место найти")
+        if type(latitude) not in (int, float) or type(longitude) not in (int, float):
+            raise ValueError("Некорректная геолокация")
+        if not math.isfinite(latitude) or not math.isfinite(longitude) or not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+            raise ValueError("Некорректная геолокация")
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+
+    try:
+        async with request.app["http"].post(
+            PLACES_URL,
+            headers={
+                "TomTom-Api-Key": TOMTOM_API_KEY,
+                "TomTom-Api-Version": "3",
+                "Attributes": "results(id,title,subtitles,distanceInMeters,poiTypes(name),address(country,municipality,street,houseNumber))",
+                "Accept-Language": "ru-RU",
+            },
+            json=places_request(query, latitude, longitude),
+        ) as response:
+            if response.status in (401, 403):
+                raise web.HTTPServiceUnavailable(text="Поиск мест пока не настроен")
+            if response.status == 429:
+                raise web.HTTPTooManyRequests(text="Лимит поиска мест исчерпан. Попробуй позже.")
+            if response.status != 200:
+                raise web.HTTPBadGateway(text="Поиск мест временно недоступен")
+            return web.json_response({"places": normalize_places(await response.json())})
+    except asyncio.TimeoutError as exc:
+        raise web.HTTPGatewayTimeout(text="Поиск мест не ответил вовремя") from exc
+    except (ClientError, TypeError, json.JSONDecodeError) as exc:
+        raise web.HTTPBadGateway(text="Поиск мест вернул некорректный ответ") from exc
+
+
 async def startup(app: web.Application):
     global http
     http = app["http"] = ClientSession(timeout=ClientTimeout(total=60))
@@ -433,12 +547,14 @@ async def cleanup(app: web.Application):
 def main():
     app = web.Application(client_max_size=6 * 1024 * 1024, middlewares=[cors])
     app["rate_limits"] = defaultdict(deque)
+    app["place_rate_limits"] = defaultdict(deque)
     app.add_routes([
         web.get("/", index),
         web.get("/health", health),
         web.get("/api/capture/{capture_id}", capture),
         web.post("/api/fridge/photo", fridge_photo),
         web.post("/api/ai", ai),
+        web.post("/api/places", places),
         web.options("/{tail:.*}", options),
     ])
     SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(app, path=WEBHOOK_PATH)

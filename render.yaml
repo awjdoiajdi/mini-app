@@ -11,3 +11,5 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
+      - key: TOMTOM_API_KEY
+        sync: false
