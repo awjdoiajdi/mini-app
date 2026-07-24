@@ -1,3 +1,15 @@
+# Runtime state and secrets
+reminders.json
+.env
+.env.*
+
+# Python tooling
 __pycache__/
 *.py[cod]
-.env
+.venv/
+venv/
+
+# Test and editor artefacts
+.pytest_cache/
+.coverage
+.vscode/

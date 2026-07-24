@@ -49,6 +49,8 @@ REMINDER_DEFAULTS = {
 }
 REMINDER_USERS: dict[str, dict] = {}
 REMINDER_LOCK = asyncio.Lock()
+MAX_REMINDERS_BODY = 32 * 1024
+MAX_AI_BODY = 24 * 1024
 http: ClientSession | None = None
 
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -91,6 +93,10 @@ def validate_init_data(init_data: str, token: str = BOT_TOKEN, max_age: int = 86
 
 def valid_clock(value: object) -> bool:
     return isinstance(value, str) and len(value) == 5 and value[2] == ":" and value[:2].isdigit() and value[3:].isdigit() and 0 <= int(value[:2]) <= 23 and 0 <= int(value[3:]) <= 59
+
+
+def valid_timezone_offset(value: object) -> bool:
+    return type(value) is int and -840 <= value <= 840
 
 
 def normalize_reminders(payload: object) -> dict:
@@ -159,7 +165,8 @@ async def send_reminder(user_id: str, text: str) -> None:
 
 
 def reminder_events(user_id: str, record: dict, now_utc: datetime) -> list[tuple[str, str]]:
-    offset = int(record.get("timezoneOffset", -180))
+    raw_offset = record.get("timezoneOffset", -180)
+    offset = raw_offset if valid_timezone_offset(raw_offset) else -180
     local_now = now_utc - timedelta(minutes=offset)
     current_time, current_date = local_now.strftime("%H:%M"), local_now.strftime("%Y-%m-%d")
     settings = normalize_reminders(record.get("settings"))
@@ -175,7 +182,10 @@ def reminder_events(user_id: str, record: dict, now_utc: datetime) -> list[tuple
             due = datetime.strptime(f"{task['date']} {task['time']}", "%Y-%m-%d %H:%M") - timedelta(minutes=15)
             if due.strftime("%Y-%m-%d %H:%M") == f"{current_date} {current_time}":
                 events.append((f"task:{task['id']}:{task['date']}:{task['time']}", f"⏳ Через 15 минут: <b>{html.escape(task['title'])}</b>. Успеешь спокойно подготовиться?"))
-    for item in record.get("snoozes", []):
+    snoozes = record.get("snoozes") if isinstance(record.get("snoozes"), list) else []
+    for item in snoozes:
+        if not isinstance(item, dict):
+            continue
         if item.get("at") == now_utc.strftime("%Y-%m-%dT%H:%M"):
             events.append((f"snooze:{item.get('id')}", str(item.get("text") or "Напоминание из DailyOS")))
     return events
@@ -188,15 +198,21 @@ async def reminder_worker(app: web.Application) -> None:
             deliveries = []
             changed = False
             for user_id, record in REMINDER_USERS.items():
-                sent = set(record.get("sent", []))
+                if not isinstance(record, dict):
+                    continue
+                raw_sent = record.get("sent") if isinstance(record.get("sent"), list) else []
+                sent = [key for key in raw_sent if isinstance(key, str)][-500:]
+                sent_keys = set(sent)
                 for key, text in reminder_events(user_id, record, now_utc):
-                    if key not in sent:
+                    if key not in sent_keys:
                         deliveries.append((user_id, text))
-                        sent.add(key)
+                        sent.append(key)
+                        sent_keys.add(key)
                         changed = True
-                record["sent"] = list(sent)[-500:]
-                before = len(record.get("snoozes", []))
-                record["snoozes"] = [item for item in record.get("snoozes", []) if item.get("at", "") >= now_utc.strftime("%Y-%m-%dT%H:%M")]
+                record["sent"] = sent[-500:]
+                raw_snoozes = record.get("snoozes") if isinstance(record.get("snoozes"), list) else []
+                before = len(raw_snoozes)
+                record["snoozes"] = [item for item in raw_snoozes if isinstance(item, dict) and item.get("at", "") >= now_utc.strftime("%Y-%m-%dT%H:%M")]
                 changed = changed or before != len(record["snoozes"])
             if changed:
                 write_reminders()
@@ -532,11 +548,13 @@ async def options(_request: web.Request):
 async def reminders(request: web.Request):
     try:
         user = validate_init_data(request.headers.get("X-Telegram-Init-Data", ""))
+        if request.content_length and request.content_length > MAX_REMINDERS_BODY:
+            raise ValueError("Слишком много данных для напоминаний")
         body = await request.json()
         if not isinstance(body, dict):
             raise ValueError("Некорректные настройки напоминаний")
         offset = body.get("timezoneOffset")
-        if type(offset) is not int or not -840 <= offset <= 840:
+        if not valid_timezone_offset(offset):
             raise ValueError("Некорректный часовой пояс")
         settings = normalize_reminders(body.get("settings"))
         tasks = normalize_reminder_tasks(body.get("tasks"))
@@ -545,12 +563,13 @@ async def reminders(request: web.Request):
 
     async with REMINDER_LOCK:
         previous = REMINDER_USERS.get(str(user["id"]), {})
+        previous = previous if isinstance(previous, dict) else {}
         REMINDER_USERS[str(user["id"])] = {
             "timezoneOffset": offset,
             "settings": settings,
             "tasks": tasks,
-            "sent": previous.get("sent", []),
-            "snoozes": previous.get("snoozes", []),
+            "sent": previous.get("sent", []) if isinstance(previous.get("sent"), list) else [],
+            "snoozes": previous.get("snoozes", []) if isinstance(previous.get("snoozes"), list) else [],
         }
         write_reminders()
     return web.json_response({"ok": True, "settings": settings})
@@ -584,6 +603,10 @@ async def fridge_photo(request: web.Request):
         raise web.HTTPBadRequest(text=str(exc)) from exc
     except RuntimeError as exc:
         raise web.HTTPBadGateway(text=str(exc)) from exc
+    except asyncio.TimeoutError as exc:
+        raise web.HTTPGatewayTimeout(text="DailyOS AI не ответил вовремя") from exc
+    except ClientError as exc:
+        raise web.HTTPBadGateway(text="Не удалось связаться с DailyOS AI") from exc
     return web.json_response({"result": result})
 
 
@@ -592,6 +615,8 @@ async def ai(request: web.Request):
         raise web.HTTPServiceUnavailable(text="DailyOS AI не настроен")
     try:
         user = validate_init_data(request.headers.get("X-Telegram-Init-Data", ""))
+        if request.content_length and request.content_length > MAX_AI_BODY:
+            raise ValueError("Слишком много данных для одного AI-запроса")
         body = await request.json()
         action, payload = body.get("action"), body.get("payload")
         if not isinstance(action, str) or not isinstance(payload, dict):
@@ -633,6 +658,8 @@ async def ai(request: web.Request):
             return web.json_response({"result": result})
     except asyncio.TimeoutError as exc:
         raise web.HTTPGatewayTimeout(text="DailyOS AI не ответил вовремя") from exc
+    except ClientError as exc:
+        raise web.HTTPBadGateway(text="Не удалось связаться с DailyOS AI") from exc
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
         raise web.HTTPBadGateway(text="DailyOS AI вернул некорректный ответ") from exc
 
