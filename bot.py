@@ -9,6 +9,7 @@ import os
 import secrets
 import time
 from collections import defaultdict, deque
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode
@@ -36,6 +37,18 @@ WEBHOOK_PATH = "/telegram/webhook"
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()
 CAPTURE_TTL = 15 * 60
 CAPTURES: dict[str, tuple[float, int, str]] = {}
+REMINDERS_FILE = Path(os.environ.get("REMINDERS_FILE", Path(__file__).parent / "reminders.json"))
+REMINDER_DEFAULTS = {
+    "water": True,
+    "waterTimes": ["10:30", "13:30", "16:30"],
+    "exercise": True,
+    "exerciseTime": "10:00",
+    "sleep": True,
+    "sleepTime": "22:30",
+    "tasks": True,
+}
+REMINDER_USERS: dict[str, dict] = {}
+REMINDER_LOCK = asyncio.Lock()
 http: ClientSession | None = None
 
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -74,6 +87,122 @@ def validate_init_data(init_data: str, token: str = BOT_TOKEN, max_age: int = 86
     if not hmac.compare_digest(received_hash, expected_hash):
         raise ValueError("Подпись Telegram не прошла проверку")
     return user
+
+
+def valid_clock(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 5 and value[2] == ":" and value[:2].isdigit() and value[3:].isdigit() and 0 <= int(value[:2]) <= 23 and 0 <= int(value[3:]) <= 59
+
+
+def normalize_reminders(payload: object) -> dict:
+    raw = payload if isinstance(payload, dict) else {}
+    water_times = raw.get("waterTimes") if isinstance(raw.get("waterTimes"), list) else REMINDER_DEFAULTS["waterTimes"]
+    water_times = sorted({value for value in water_times if valid_clock(value)})[:5] or REMINDER_DEFAULTS["waterTimes"]
+    return {
+        "water": bool(raw.get("water", REMINDER_DEFAULTS["water"])),
+        "waterTimes": water_times,
+        "exercise": bool(raw.get("exercise", REMINDER_DEFAULTS["exercise"])),
+        "exerciseTime": raw.get("exerciseTime") if valid_clock(raw.get("exerciseTime")) else REMINDER_DEFAULTS["exerciseTime"],
+        "sleep": bool(raw.get("sleep", REMINDER_DEFAULTS["sleep"])),
+        "sleepTime": raw.get("sleepTime") if valid_clock(raw.get("sleepTime")) else REMINDER_DEFAULTS["sleepTime"],
+        "tasks": bool(raw.get("tasks", REMINDER_DEFAULTS["tasks"])),
+    }
+
+
+def normalize_reminder_tasks(payload: object) -> list[dict]:
+    if not isinstance(payload, list):
+        return []
+    tasks = []
+    for task in payload[:80]:
+        if not isinstance(task, dict) or task.get("done") or not valid_clock(task.get("time")):
+            continue
+        date, title = task.get("date"), str(task.get("title") or "Задача").strip()
+        if not isinstance(date, str) or len(date) != 10 or not title:
+            continue
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            continue
+        tasks.append({"id": str(task.get("id") or secrets.token_urlsafe(6))[:48], "title": title[:120], "date": date, "time": task["time"]})
+    return tasks
+
+
+def read_reminders() -> dict[str, dict]:
+    try:
+        data = json.loads(REMINDERS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def write_reminders() -> None:
+    REMINDERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = REMINDERS_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(REMINDER_USERS, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    temporary.replace(REMINDERS_FILE)
+
+
+def reminder_keyboard() -> types.InlineKeyboardMarkup:
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="Готово", callback_data="reminder:done")
+    keyboard.button(text="Через 15 мин", callback_data="reminder:later")
+    keyboard.button(text="Открыть DailyOS", web_app=WebAppInfo(url=app_url()))
+    keyboard.adjust(2, 1)
+    return keyboard.as_markup()
+
+
+async def send_reminder(user_id: str, text: str) -> None:
+    try:
+        await bot.send_message(int(user_id), text, reply_markup=reminder_keyboard())
+    except Exception:
+        # Users can block the bot; a failed delivery must not stop reminders for others.
+        return
+
+
+def reminder_events(user_id: str, record: dict, now_utc: datetime) -> list[tuple[str, str]]:
+    offset = int(record.get("timezoneOffset", -180))
+    local_now = now_utc - timedelta(minutes=offset)
+    current_time, current_date = local_now.strftime("%H:%M"), local_now.strftime("%Y-%m-%d")
+    settings = normalize_reminders(record.get("settings"))
+    events: list[tuple[str, str]] = []
+    if settings["water"] and current_time in settings["waterTimes"]:
+        events.append((f"water:{current_date}:{current_time}", "💧 Время выпить воды. Сделай пару глотков — это займёт минуту."))
+    if settings["exercise"] and current_time == settings["exerciseTime"]:
+        events.append((f"exercise:{current_date}", "🤸 Пора на короткую зарядку. Три минуты движения уже считаются."))
+    if settings["sleep"] and current_time == settings["sleepTime"]:
+        events.append((f"sleep:{current_date}", "🌙 Пора мягко завершать день. Отложи телефон, закрой незавершённое и готовься ко сну."))
+    if settings["tasks"]:
+        for task in normalize_reminder_tasks(record.get("tasks")):
+            due = datetime.strptime(f"{task['date']} {task['time']}", "%Y-%m-%d %H:%M") - timedelta(minutes=15)
+            if due.strftime("%Y-%m-%d %H:%M") == f"{current_date} {current_time}":
+                events.append((f"task:{task['id']}:{task['date']}:{task['time']}", f"⏳ Через 15 минут: <b>{html.escape(task['title'])}</b>. Успеешь спокойно подготовиться?"))
+    for item in record.get("snoozes", []):
+        if item.get("at") == now_utc.strftime("%Y-%m-%dT%H:%M"):
+            events.append((f"snooze:{item.get('id')}", str(item.get("text") or "Напоминание из DailyOS")))
+    return events
+
+
+async def reminder_worker(app: web.Application) -> None:
+    while True:
+        now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        async with REMINDER_LOCK:
+            deliveries = []
+            changed = False
+            for user_id, record in REMINDER_USERS.items():
+                sent = set(record.get("sent", []))
+                for key, text in reminder_events(user_id, record, now_utc):
+                    if key not in sent:
+                        deliveries.append((user_id, text))
+                        sent.add(key)
+                        changed = True
+                record["sent"] = list(sent)[-500:]
+                before = len(record.get("snoozes", []))
+                record["snoozes"] = [item for item in record.get("snoozes", []) if item.get("at", "") >= now_utc.strftime("%Y-%m-%dT%H:%M")]
+                changed = changed or before != len(record["snoozes"])
+            if changed:
+                write_reminders()
+        for user_id, text in deliveries:
+            await send_reminder(user_id, text)
+        await asyncio.sleep(20)
 
 
 def ai_messages(action: str, payload: dict) -> list[dict[str, str]]:
@@ -333,6 +462,22 @@ async def start(message: types.Message):
     )
 
 
+@dp.callback_query(F.data.startswith("reminder:"))
+async def reminder_action(callback: types.CallbackQuery):
+    if not callback.from_user or not callback.data:
+        return
+    action = callback.data.rsplit(":", 1)[-1]
+    if action == "later":
+        text = callback.message.text if callback.message and callback.message.text else "Напоминание из DailyOS"
+        async with REMINDER_LOCK:
+            record = REMINDER_USERS.setdefault(str(callback.from_user.id), {"settings": REMINDER_DEFAULTS.copy(), "tasks": [], "sent": [], "snoozes": []})
+            record.setdefault("snoozes", []).append({"id": secrets.token_urlsafe(6), "at": (datetime.now(timezone.utc) + timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M"), "text": text})
+            write_reminders()
+        await callback.answer("Напомню через 15 минут")
+    else:
+        await callback.answer("Отлично, так держать ✨")
+
+
 @dp.message(F.text)
 async def capture_message(message: types.Message):
     await answer_capture(
@@ -382,6 +527,33 @@ async def health(_request: web.Request):
 
 async def options(_request: web.Request):
     return web.Response()
+
+
+async def reminders(request: web.Request):
+    try:
+        user = validate_init_data(request.headers.get("X-Telegram-Init-Data", ""))
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("Некорректные настройки напоминаний")
+        offset = body.get("timezoneOffset")
+        if type(offset) is not int or not -840 <= offset <= 840:
+            raise ValueError("Некорректный часовой пояс")
+        settings = normalize_reminders(body.get("settings"))
+        tasks = normalize_reminder_tasks(body.get("tasks"))
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+
+    async with REMINDER_LOCK:
+        previous = REMINDER_USERS.get(str(user["id"]), {})
+        REMINDER_USERS[str(user["id"])] = {
+            "timezoneOffset": offset,
+            "settings": settings,
+            "tasks": tasks,
+            "sent": previous.get("sent", []),
+            "snoozes": previous.get("snoozes", []),
+        }
+        write_reminders()
+    return web.json_response({"ok": True, "settings": settings})
 
 
 async def capture(request: web.Request):
@@ -529,8 +701,10 @@ async def places(request: web.Request):
 
 
 async def startup(app: web.Application):
-    global http
+    global http, REMINDER_USERS
     http = app["http"] = ClientSession(timeout=ClientTimeout(total=60))
+    REMINDER_USERS = read_reminders()
+    app["reminder_worker"] = asyncio.create_task(reminder_worker(app))
     await bot.set_chat_menu_button(menu_button=types.MenuButtonWebApp(text="Открыть DailyOS", web_app=WebAppInfo(url=app_url())))
     await bot.set_webhook(
         f"{APP_URL.rstrip('/')}{WEBHOOK_PATH}",
@@ -540,6 +714,13 @@ async def startup(app: web.Application):
 
 
 async def cleanup(app: web.Application):
+    worker = app.get("reminder_worker")
+    if worker:
+        worker.cancel()
+        try:
+            await worker
+        except asyncio.CancelledError:
+            pass
     await app["http"].close()
     await bot.session.close()
 
@@ -552,6 +733,7 @@ def main():
         web.get("/", index),
         web.get("/health", health),
         web.get("/api/capture/{capture_id}", capture),
+        web.post("/api/reminders", reminders),
         web.post("/api/fridge/photo", fridge_photo),
         web.post("/api/ai", ai),
         web.post("/api/places", places),
