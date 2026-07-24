@@ -44,7 +44,7 @@ if __name__ == "__main__":
     assert settings["waterTimes"] == ["09:00"] and settings["sleepTime"] == "23:15"
     assert valid_timezone_offset(-180) and not valid_timezone_offset("-180") and not valid_timezone_offset(900)
     assert normalize_reminder_tasks([{"id": "t1", "title": "Созвон", "date": "2026-07-24", "time": "10:15"}, {"title": "bad", "date": "tomorrow", "time": "10:00"}]) == [{"id": "t1", "title": "Созвон", "date": "2026-07-24", "time": "10:15"}]
-    events = reminder_events("42", {"timezoneOffset": 0, "settings": {"water": False, "exercise": False, "sleep": False, "tasks": True}, "tasks": [{"id": "t1", "title": "Созвон", "date": "2026-07-24", "time": "10:15"}], "snoozes": []}, datetime(2026, 7, 24, 10, 0, tzinfo=timezone.utc))
+    events = reminder_events("42", {"timezoneOffset": 0, "settings": {"water": False, "sleep": False, "tasks": True}, "tasks": [{"id": "t1", "title": "Созвон", "date": "2026-07-24", "time": "10:15"}], "snoozes": []}, datetime(2026, 7, 24, 10, 0, tzinfo=timezone.utc))
     assert events and events[0][0].startswith("task:t1:")
     assert reminder_events("42", {"timezoneOffset": "bad", "snoozes": ["bad", {"at": "2026-07-24T10:00", "id": "s1", "text": "Сделай паузу"}]}, datetime(2026, 7, 24, 10, 0, tzinfo=timezone.utc))[-1][0] == "snooze:s1"
     print("Telegram initData validation: OK")

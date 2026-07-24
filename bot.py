@@ -41,8 +41,6 @@ REMINDERS_FILE = Path(os.environ.get("REMINDERS_FILE", Path(__file__).parent / "
 REMINDER_DEFAULTS = {
     "water": True,
     "waterTimes": ["10:30", "13:30", "16:30"],
-    "exercise": True,
-    "exerciseTime": "10:00",
     "sleep": True,
     "sleepTime": "22:30",
     "tasks": True,
@@ -106,8 +104,6 @@ def normalize_reminders(payload: object) -> dict:
     return {
         "water": bool(raw.get("water", REMINDER_DEFAULTS["water"])),
         "waterTimes": water_times,
-        "exercise": bool(raw.get("exercise", REMINDER_DEFAULTS["exercise"])),
-        "exerciseTime": raw.get("exerciseTime") if valid_clock(raw.get("exerciseTime")) else REMINDER_DEFAULTS["exerciseTime"],
         "sleep": bool(raw.get("sleep", REMINDER_DEFAULTS["sleep"])),
         "sleepTime": raw.get("sleepTime") if valid_clock(raw.get("sleepTime")) else REMINDER_DEFAULTS["sleepTime"],
         "tasks": bool(raw.get("tasks", REMINDER_DEFAULTS["tasks"])),
@@ -193,8 +189,6 @@ def reminder_events(user_id: str, record: dict, now_utc: datetime) -> list[tuple
     events: list[tuple[str, str]] = []
     if settings["water"] and current_time in settings["waterTimes"]:
         events.append((f"water:{current_date}:{current_time}", "💧 Время выпить воды. Сделай пару глотков — это займёт минуту."))
-    if settings["exercise"] and current_time == settings["exerciseTime"]:
-        events.append((f"exercise:{current_date}", "🤸 Пора на короткую зарядку. Три минуты движения уже считаются."))
     if settings["sleep"] and current_time == settings["sleepTime"]:
         events.append((f"sleep:{current_date}", "🌙 Пора мягко завершать день. Отложи телефон, закрой незавершённое и готовься ко сну."))
     if settings["tasks"]:
