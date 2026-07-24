@@ -119,7 +119,7 @@ def normalize_reminder_tasks(payload: object) -> list[dict]:
         return []
     tasks = []
     for task in payload[:80]:
-        if not isinstance(task, dict) or task.get("done") or not valid_clock(task.get("time")):
+        if not isinstance(task, dict) or task.get("done") or task.get("waiting") or not valid_clock(task.get("time")):
             continue
         date, title = task.get("date"), str(task.get("title") or "Задача").strip()
         if not isinstance(date, str) or len(date) != 10 or not title:
@@ -130,6 +130,26 @@ def normalize_reminder_tasks(payload: object) -> list[dict]:
             continue
         tasks.append({"id": str(task.get("id") or secrets.token_urlsafe(6))[:48], "title": title[:120], "date": date, "time": task["time"]})
     return tasks
+
+
+def normalize_followups(payload: object) -> list[dict]:
+    if not isinstance(payload, list):
+        return []
+    followups = []
+    for task in payload[:80]:
+        if not isinstance(task, dict) or task.get("done") or not task.get("waiting"):
+            continue
+        date = task.get("followUpDate")
+        time = task.get("followUpTime") if valid_clock(task.get("followUpTime")) else "10:00"
+        title = str(task.get("title") or "Задача").strip()
+        if not isinstance(date, str) or len(date) != 10 or not title:
+            continue
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            continue
+        followups.append({"id": str(task.get("id") or secrets.token_urlsafe(6))[:48], "title": title[:120], "date": date, "time": time})
+    return followups
 
 
 def read_reminders() -> dict[str, dict]:
@@ -182,6 +202,9 @@ def reminder_events(user_id: str, record: dict, now_utc: datetime) -> list[tuple
             due = datetime.strptime(f"{task['date']} {task['time']}", "%Y-%m-%d %H:%M") - timedelta(minutes=15)
             if due.strftime("%Y-%m-%d %H:%M") == f"{current_date} {current_time}":
                 events.append((f"task:{task['id']}:{task['date']}:{task['time']}", f"⏳ Через 15 минут: <b>{html.escape(task['title'])}</b>. Успеешь спокойно подготовиться?"))
+        for task in normalize_followups(record.get("tasks")):
+            if f"{task['date']} {task['time']}" == f"{current_date} {current_time}":
+                events.append((f"followup:{task['id']}:{task['date']}:{task['time']}", f"💬 Пора вернуться к задаче: <b>{html.escape(task['title'])}</b>. Напиши человеку и реши, что делать дальше."))
     snoozes = record.get("snoozes") if isinstance(record.get("snoozes"), list) else []
     for item in snoozes:
         if not isinstance(item, dict):
