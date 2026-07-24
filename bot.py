@@ -135,8 +135,8 @@ def normalize_followups(payload: object) -> list[dict]:
     for task in payload[:80]:
         if not isinstance(task, dict) or task.get("done") or not task.get("waiting"):
             continue
-        date = task.get("followUpDate")
-        time = task.get("followUpTime") if valid_clock(task.get("followUpTime")) else "10:00"
+        date = task.get("followUpDate") or task.get("date")
+        time = task.get("followUpTime") if valid_clock(task.get("followUpTime")) else task.get("time") if valid_clock(task.get("time")) else "10:00"
         title = str(task.get("title") or "Задача").strip()
         if not isinstance(date, str) or len(date) != 10 or not title:
             continue
@@ -144,7 +144,7 @@ def normalize_followups(payload: object) -> list[dict]:
             datetime.strptime(date, "%Y-%m-%d")
         except ValueError:
             continue
-        followups.append({"id": str(task.get("id") or secrets.token_urlsafe(6))[:48], "title": title[:120], "date": date, "time": time})
+        followups.append({"id": str(task.get("id") or secrets.token_urlsafe(6))[:48], "title": title[:120], "date": date, "time": time, "waiting": True})
     return followups
 
 
@@ -196,7 +196,7 @@ def reminder_events(user_id: str, record: dict, now_utc: datetime) -> list[tuple
             due = datetime.strptime(f"{task['date']} {task['time']}", "%Y-%m-%d %H:%M") - timedelta(minutes=15)
             if due.strftime("%Y-%m-%d %H:%M") == f"{current_date} {current_time}":
                 events.append((f"task:{task['id']}:{task['date']}:{task['time']}", f"⏳ Через 15 минут: <b>{html.escape(task['title'])}</b>. Успеешь спокойно подготовиться?"))
-        for task in normalize_followups(record.get("tasks")):
+        for task in normalize_followups(record.get("followups")):
             if f"{task['date']} {task['time']}" == f"{current_date} {current_time}":
                 events.append((f"followup:{task['id']}:{task['date']}:{task['time']}", f"💬 Пора вернуться к задаче: <b>{html.escape(task['title'])}</b>. Напиши человеку и реши, что делать дальше."))
     snoozes = record.get("snoozes") if isinstance(record.get("snoozes"), list) else []
@@ -575,6 +575,7 @@ async def reminders(request: web.Request):
             raise ValueError("Некорректный часовой пояс")
         settings = normalize_reminders(body.get("settings"))
         tasks = normalize_reminder_tasks(body.get("tasks"))
+        followups = normalize_followups(body.get("tasks"))
     except (ValueError, json.JSONDecodeError) as exc:
         raise web.HTTPBadRequest(text=str(exc)) from exc
 
@@ -585,6 +586,7 @@ async def reminders(request: web.Request):
             "timezoneOffset": offset,
             "settings": settings,
             "tasks": tasks,
+            "followups": followups,
             "sent": previous.get("sent", []) if isinstance(previous.get("sent"), list) else [],
             "snoozes": previous.get("snoozes", []) if isinstance(previous.get("snoozes"), list) else [],
         }

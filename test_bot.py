@@ -8,7 +8,7 @@ os.environ.setdefault("BOT_TOKEN", "123456:test-token-for-local-check")
 
 from datetime import datetime, timezone
 
-from bot import APP_VERSION, ai_messages, app_url, normalize_places, normalize_reminders, normalize_reminder_tasks, places_request, pop_capture, parse_ai_json, reminder_events, remember_capture, valid_timezone_offset, validate_init_data
+from bot import APP_VERSION, ai_messages, app_url, normalize_followups, normalize_places, normalize_reminders, normalize_reminder_tasks, places_request, pop_capture, parse_ai_json, reminder_events, remember_capture, valid_timezone_offset, validate_init_data
 
 
 def signed_data(token, now=1_700_000_000):
@@ -44,7 +44,11 @@ if __name__ == "__main__":
     assert settings["waterTimes"] == ["09:00"] and settings["sleepTime"] == "23:15"
     assert valid_timezone_offset(-180) and not valid_timezone_offset("-180") and not valid_timezone_offset(900)
     assert normalize_reminder_tasks([{"id": "t1", "title": "Созвон", "date": "2026-07-24", "time": "10:15"}, {"title": "bad", "date": "tomorrow", "time": "10:00"}]) == [{"id": "t1", "title": "Созвон", "date": "2026-07-24", "time": "10:15"}]
+    followups = normalize_followups([{"id": "w1", "title": "Ответить клиенту", "waiting": True, "followUpDate": "2026-07-24", "followUpTime": "10:00"}])
+    assert followups == [{"id": "w1", "title": "Ответить клиенту", "date": "2026-07-24", "time": "10:00", "waiting": True}]
     events = reminder_events("42", {"timezoneOffset": 0, "settings": {"water": False, "sleep": False, "tasks": True}, "tasks": [{"id": "t1", "title": "Созвон", "date": "2026-07-24", "time": "10:15"}], "snoozes": []}, datetime(2026, 7, 24, 10, 0, tzinfo=timezone.utc))
     assert events and events[0][0].startswith("task:t1:")
+    followup_events = reminder_events("42", {"timezoneOffset": 0, "settings": {"water": False, "sleep": False, "tasks": True}, "followups": followups}, datetime(2026, 7, 24, 10, 0, tzinfo=timezone.utc))
+    assert followup_events and followup_events[0][0].startswith("followup:w1:")
     assert reminder_events("42", {"timezoneOffset": "bad", "snoozes": ["bad", {"at": "2026-07-24T10:00", "id": "s1", "text": "Сделай паузу"}]}, datetime(2026, 7, 24, 10, 0, tzinfo=timezone.utc))[-1][0] == "snooze:s1"
     print("Telegram initData validation: OK")
